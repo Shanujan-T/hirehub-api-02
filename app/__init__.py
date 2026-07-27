@@ -207,6 +207,7 @@ def create_app():
             contract_model,
             job_model,
             open_call_model,
+            open_call_skill_model,
             payment_model,
             report_model,
             review_model,
