@@ -1,0 +1,61 @@
+from flask import Blueprint, request
+from flask_jwt_extended import get_jwt_identity, jwt_required
+
+from app.controllers import contract_controller
+from app.models.user_model import User
+
+contracts_bp = Blueprint("contracts", __name__, url_prefix="/api/contracts")
+
+
+def _current_user():
+    user = User.query.get(int(get_jwt_identity()))
+    return user.id, user.role
+
+
+@contracts_bp.route("", methods=["GET"])
+@jwt_required()
+def list_contracts():
+    user_id, user_role = _current_user()
+    return contract_controller.get_contracts(user_id, user_role)
+
+
+@contracts_bp.route("/<int:contract_id>", methods=["GET"])
+@jwt_required()
+def get_contract(contract_id):
+    user_id, user_role = _current_user()
+    return contract_controller.get_contract(contract_id, user_id, user_role)
+
+
+@contracts_bp.route("/<int:contract_id>/open-internally", methods=["POST"])
+@jwt_required()
+def open_internally(contract_id):
+    return contract_controller.open_contract_internally(contract_id, get_jwt_identity())
+
+
+@contracts_bp.route("/<int:contract_id>/select-member", methods=["POST"])
+@jwt_required()
+def select_member(contract_id):
+    data = request.get_json() or {}
+    return contract_controller.select_member(
+        contract_id, data.get("application_id"), get_jwt_identity()
+    )
+
+
+@contracts_bp.route("/<int:contract_id>/submit-deliverable", methods=["POST"])
+@jwt_required()
+def submit_deliverable(contract_id):
+    return contract_controller.submit_deliverable(
+        contract_id, get_jwt_identity(), request.get_json() or {}
+    )
+
+
+@contracts_bp.route("/<int:contract_id>/admin-approve-deliverable", methods=["POST"])
+@jwt_required()
+def admin_approve_deliverable(contract_id):
+    return contract_controller.approve_deliverable_admin(contract_id, get_jwt_identity())
+
+
+@contracts_bp.route("/<int:contract_id>/employer-approve-deliverable", methods=["POST"])
+@jwt_required()
+def employer_approve_deliverable(contract_id):
+    return contract_controller.approve_deliverable_employer(contract_id, get_jwt_identity())
