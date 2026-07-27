@@ -172,7 +172,7 @@ def _build_endpoint_index(app):
         grouped[group].sort(key=lambda entry: (_METHOD_ORDER[entry["method"]], entry["path"]))
 
     return {
-        "api": "LocalJobFinder API",
+        "api": "HireHub API",
         "version": "1.0",
         "endpoints": {group: grouped[group] for group in _GROUP_ORDER if group in grouped},
     }
