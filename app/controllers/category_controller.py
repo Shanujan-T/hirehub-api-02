@@ -72,8 +72,8 @@ def pricing_suggestion(category_id, location):
     cat = Category.query.get(category_id)
     if not cat:
         return jsonify({"error": "Category not found."}), 404
-    price = get_pricing_suggestion(category_id, location)
-    return jsonify({"suggested_price": price, "location": location, "category_id": category_id}), 200
+    result = get_pricing_suggestion(category_id, location)
+    return jsonify(result), 200
 
 
 def seed_category_pricing(category_id, data):
