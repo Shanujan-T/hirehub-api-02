@@ -1,4 +1,4 @@
-"""Seed demo data for LocalJobFinder viva demo."""
+"""Seed demo data for HireHub viva demo."""
 
 from datetime import date, timedelta
 from decimal import Decimal
