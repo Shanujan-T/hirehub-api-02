@@ -12,7 +12,7 @@ class Config:
         f"mysql+pymysql://{os.getenv('DB_USER', 'root')}:"
         f"{os.getenv('DB_PASSWORD', '')}@"
         f"{os.getenv('DB_HOST', '127.0.0.1')}/"
-        f"{os.getenv('DB_NAME', 'localjobfinder')}"
+        f"{os.getenv('DB_NAME', 'hirehub')}"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key")
