@@ -49,9 +49,13 @@ def recalc_category_pricing(category_id, location):
 
 
 def get_pricing_suggestion(category_id, location):
+    """Return average_price and sample_size; average_price is None when no row exists."""
     pricing = CategoryPricing.query.filter_by(
         category_id=category_id, location=location
     ).first()
-    if pricing:
-        return float(pricing.average_price)
-    return 0.0
+    if pricing and pricing.sample_size > 0:
+        return {
+            "average_price": float(pricing.average_price),
+            "sample_size": int(pricing.sample_size),
+        }
+    return {"average_price": None, "sample_size": 0}
