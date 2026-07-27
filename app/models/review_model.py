@@ -6,7 +6,7 @@ class Review(db.Model):
     __tablename__ = "reviews"
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    contract_id = db.Column(db.Integer, db.ForeignKey("contracts.id"), nullable=False)
+    contract_id = db.Column(db.Integer, db.ForeignKey("contracts.id"), nullable=False, unique=True)
     reviewer_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     community_id = db.Column(db.Integer, db.ForeignKey("communities.id"), nullable=False)
     member_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
