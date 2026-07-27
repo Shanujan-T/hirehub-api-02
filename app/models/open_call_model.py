@@ -8,7 +8,6 @@ class OpenCall(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     community_id = db.Column(db.Integer, db.ForeignKey("communities.id"), nullable=False)
     title = db.Column(db.String(255), nullable=False)
-    required_skills = db.Column(db.String(512), nullable=True)
     status = db.Column(
         db.Enum("open", "closed", name="open_call_status"),
         nullable=False,
@@ -17,13 +16,18 @@ class OpenCall(db.Model):
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
     community = db.relationship("Community", back_populates="open_calls")
+    open_call_skills = db.relationship(
+        "OpenCallSkill", back_populates="open_call", cascade="all, delete-orphan", lazy="dynamic"
+    )
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_skills=False):
+        data = {
             "id": self.id,
             "community_id": self.community_id,
             "title": self.title,
-            "required_skills": self.required_skills,
             "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+        if include_skills:
+            data["skills"] = [ocs.to_dict() for ocs in self.open_call_skills]
+        return data
