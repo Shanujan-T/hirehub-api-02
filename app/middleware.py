@@ -95,3 +95,14 @@ def get_admin_community_ids(user_id):
         user_id=user_id, role="admin", status="approved"
     ).all()
     return [m.community_id for m in memberships]
+
+
+MIN_COMMUNITY_MEMBERS = 3
+
+
+def community_meets_minimum(community_id):
+    """Return True if community has at least MIN_COMMUNITY_MEMBERS approved members."""
+    count = CommunityMember.query.filter_by(
+        community_id=community_id, status="approved"
+    ).count()
+    return count >= MIN_COMMUNITY_MEMBERS
