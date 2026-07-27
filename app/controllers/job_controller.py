@@ -4,12 +4,9 @@ from decimal import Decimal
 from flask import jsonify
 
 from app.extensions import db
-from app.middleware import get_admin_community_ids
-from app.models.community_member_model import CommunityMember
+from app.middleware import community_meets_minimum, get_admin_community_ids
 from app.models.job_model import Job
 from app.utils.pricing_utils import get_pricing_suggestion
-
-MIN_COMMUNITY_MEMBERS = 3
 
 
 def _validate_job_payload(data):
@@ -34,7 +31,9 @@ def create_job(data, employer_id):
     if errors:
         return jsonify({"errors": errors}), 400
 
-    suggested = get_pricing_suggestion(data["category_id"], data["location"])
+    pricing = get_pricing_suggestion(data["category_id"], data["location"])
+    suggested = pricing["average_price"]
+
     deadline = data["deadline"]
     if isinstance(deadline, str):
         deadline = datetime.fromisoformat(deadline).date()
@@ -46,7 +45,7 @@ def create_job(data, employer_id):
         description=data["description"],
         location=data["location"],
         deadline=deadline,
-        suggested_price=Decimal(str(suggested)),
+        suggested_price=Decimal(str(suggested)) if suggested is not None else None,
         final_price=Decimal(str(data["final_price"])),
         status="open",
     )
@@ -72,10 +71,7 @@ def get_jobs(user_id, user_role):
     admin_community_ids = get_admin_community_ids(user_id)
     eligible_community_ids = []
     for cid in admin_community_ids:
-        count = CommunityMember.query.filter_by(
-            community_id=cid, status="approved"
-        ).count()
-        if count >= MIN_COMMUNITY_MEMBERS:
+        if community_meets_minimum(cid):
             eligible_community_ids.append(cid)
 
     if not eligible_community_ids:
