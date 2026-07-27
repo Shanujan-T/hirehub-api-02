@@ -1,1 +1,1 @@
-# LocalJobFinder API
+# HireHub API
