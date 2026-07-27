@@ -3,7 +3,7 @@ from decimal import Decimal
 from flask import jsonify
 
 from app.extensions import db
-from app.middleware import get_admin_community_ids, is_community_admin
+from app.middleware import community_meets_minimum, get_admin_community_ids, is_community_admin
 from app.models.community_application_model import CommunityApplication
 from app.models.community_member_model import CommunityMember
 from app.models.community_model import Community
@@ -11,6 +11,15 @@ from app.models.contract_model import Contract
 from app.models.job_model import Job
 
 MIN_COMMUNITY_MEMBERS = 3
+
+
+def _validate_commission_percent(percent):
+    if percent is None:
+        return Decimal("3.0")
+    pct = Decimal(str(percent))
+    if pct < Decimal("2") or pct > Decimal("5"):
+        return None
+    return pct
 
 
 def apply_to_job(job_id, community_id, user_id):
@@ -22,10 +31,7 @@ def apply_to_job(job_id, community_id, user_id):
     if not is_community_admin(user_id, community_id):
         return jsonify({"error": "Forbidden."}), 403
 
-    member_count = CommunityMember.query.filter_by(
-        community_id=community_id, status="approved"
-    ).count()
-    if member_count < MIN_COMMUNITY_MEMBERS:
+    if not community_meets_minimum(community_id):
         return jsonify({"error": f"Community must have at least {MIN_COMMUNITY_MEMBERS} approved members."}), 400
 
     existing = CommunityApplication.query.filter_by(
@@ -77,7 +83,8 @@ def get_my_applications(user_id):
     return jsonify({"community_applications": [a.to_dict(include_job=True) for a in applications]}), 200
 
 
-def approve_community(application_id, employer_id):
+def approve_community(application_id, employer_id, data=None):
+    data = data or {}
     application = CommunityApplication.query.get(application_id)
     if not application:
         return jsonify({"error": "Community application not found."}), 404
@@ -99,7 +106,10 @@ def approve_community(application_id, employer_id):
     for other in others:
         other.status = "rejected"
 
-    commission_percent = Decimal("3.0")
+    commission_percent = _validate_commission_percent(data.get("commission_percent"))
+    if commission_percent is None:
+        return jsonify({"error": "commission_percent must be between 2 and 5."}), 400
+
     contract = Contract(
         job_id=job.id,
         community_id=application.community_id,
