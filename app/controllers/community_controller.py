@@ -58,7 +58,7 @@ def get_community(community_id):
     members = CommunityMember.query.filter_by(
         community_id=community_id, status="approved"
     ).all()
-    data["members"] = [m.to_dict(include_user=True) for m in members]
+    data["members"] = [m.to_dict(include_user=True, include_user_skills=True) for m in members]
     return jsonify({"community": data}), 200
 
 
