@@ -56,7 +56,7 @@ def login(data):
         return jsonify({"error": "Invalid email or password."}), 401
 
     if not user.is_active:
-        return jsonify({"error": "Account is inactive."}), 403
+        return jsonify({"error": "Account suspended."}), 403
 
     token = create_access_token(identity=str(user.id))
     return jsonify({"access_token": token, "user": user.to_dict()}), 200
@@ -66,4 +66,6 @@ def get_me(user_id):
     user = User.query.get(int(user_id))
     if not user:
         return jsonify({"error": "User not found."}), 404
+    if not user.is_active:
+        return jsonify({"error": "Account suspended."}), 403
     return jsonify({"user": user.to_dict(include_stats=True)}), 200
