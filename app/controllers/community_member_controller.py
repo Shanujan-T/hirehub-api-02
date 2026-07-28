@@ -1,7 +1,7 @@
 from flask import jsonify
 
 from app.extensions import db
-from app.middleware import get_admin_community_ids, is_community_admin
+from app.middleware import is_community_admin
 from app.models.community_member_model import CommunityMember
 from app.utils import utc_now
 
@@ -32,7 +32,13 @@ def get_community_members(community_id, status=None):
     if status:
         query = query.filter_by(status=status)
     members = query.all()
-    return jsonify({"community_members": [m.to_dict(include_user=True) for m in members]}), 200
+    return jsonify(
+        {
+            "community_members": [
+                m.to_dict(include_user=True, include_user_skills=True) for m in members
+            ]
+        }
+    ), 200
 
 
 def get_my_memberships(user_id):
@@ -65,8 +71,14 @@ def delete_community_member(membership_id, user_id):
     membership = CommunityMember.query.get(membership_id)
     if not membership:
         return jsonify({"error": "Community member not found."}), 404
-    admin_ids = get_admin_community_ids(user_id)
-    if membership.community_id not in admin_ids and membership.user_id != user_id:
+
+    is_admin = is_community_admin(user_id, membership.community_id)
+    is_self = membership.user_id == user_id
+
+    if is_admin:
+        if is_self:
+            return jsonify({"error": "Community admins cannot remove themselves."}), 403
+    elif not is_self:
         return jsonify({"error": "Forbidden."}), 403
     try:
         db.session.delete(membership)
