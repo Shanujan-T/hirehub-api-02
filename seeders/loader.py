@@ -1,4 +1,4 @@
-"""Load 20-row example datasets from seeders/data into the database."""
+"""Load example datasets from seeders/data into the database."""
 
 import json
 from datetime import date, datetime
@@ -65,7 +65,7 @@ def _parse_datetime(value: str | None):
 
 
 def run_seed(session) -> None:
-    """Insert all seeder files in FK-safe order. IDs 1–20 align across files."""
+    """Insert all seeder files in FK-safe order. User id 21 is the platform admin."""
     now = utc_now()
 
     for row in _load_json("users"):
