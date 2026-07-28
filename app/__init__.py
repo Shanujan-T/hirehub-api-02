@@ -1,3 +1,4 @@
+import logging
 import re
 from collections import defaultdict
 
@@ -216,7 +217,12 @@ def create_app():
             user_skill_model,
         )
 
-        db.create_all()
+        try:
+            db.create_all()
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Database tables not initialized at startup: %s", exc
+            )
 
     register_blueprints(app)
 
