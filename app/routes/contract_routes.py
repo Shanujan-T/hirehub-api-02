@@ -1,7 +1,7 @@
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
-from app.controllers import contract_controller
+from app.controllers import contract_controller, message_controller
 from app.models.user_model import User
 
 contracts_bp = Blueprint("contracts", __name__, url_prefix="/api/contracts")
@@ -55,7 +55,21 @@ def admin_approve_deliverable(contract_id):
     return contract_controller.approve_deliverable_admin(contract_id, get_jwt_identity())
 
 
-@contracts_bp.route("/<int:contract_id>/employer-approve-deliverable", methods=["POST"])
+@contracts_bp.route("/<int:contract_id>/client-approve-deliverable", methods=["POST"])
 @jwt_required()
-def employer_approve_deliverable(contract_id):
-    return contract_controller.approve_deliverable_employer(contract_id, get_jwt_identity())
+def client_approve_deliverable(contract_id):
+    return contract_controller.approve_deliverable_client(contract_id, get_jwt_identity())
+
+
+@contracts_bp.route("/<int:contract_id>/messages", methods=["GET"])
+@jwt_required()
+def list_contract_messages(contract_id):
+    return message_controller.list_messages(contract_id, get_jwt_identity())
+
+
+@contracts_bp.route("/<int:contract_id>/messages", methods=["POST"])
+@jwt_required()
+def send_contract_message(contract_id):
+    return message_controller.send_message(
+        contract_id, get_jwt_identity(), request.get_json() or {}
+    )

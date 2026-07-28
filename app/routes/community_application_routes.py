@@ -19,7 +19,7 @@ def my_applications():
 def apply_to_job():
     data = request.get_json() or {}
     return community_application_controller.apply_to_job(
-        data.get("job_id"), data.get("community_id"), get_jwt_identity()
+        data.get("job_id"), data.get("community_id"), get_jwt_identity(), data
     )
 
 

@@ -39,8 +39,11 @@ class Contract(db.Model):
     )
     payment = db.relationship("Payment", back_populates="contract", uselist=False)
     reviews = db.relationship("Review", back_populates="contract", lazy="dynamic")
+    conversation = db.relationship(
+        "Conversation", back_populates="contract", uselist=False
+    )
 
-    def to_dict(self, include_job=False, strip_employer=False, include_community=False):
+    def to_dict(self, include_job=False, strip_client=False, include_community=False):
         data = {
             "id": self.id,
             "job_id": self.job_id,
@@ -55,7 +58,7 @@ class Contract(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
         if include_job and self.job:
-            data["job"] = self.job.to_dict(strip_employer=strip_employer)
+            data["job"] = self.job.to_dict(strip_client=strip_client)
         if include_community and self.community:
             data["community"] = self.community.to_dict()
         if self.assigned_member:
