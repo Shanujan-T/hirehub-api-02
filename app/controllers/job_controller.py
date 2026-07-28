@@ -26,7 +26,7 @@ def _validate_job_payload(data):
     return errors
 
 
-def create_job(data, employer_id):
+def create_job(data, client_id):
     errors = _validate_job_payload(data)
     if errors:
         return jsonify({"errors": errors}), 400
@@ -39,7 +39,7 @@ def create_job(data, employer_id):
         deadline = datetime.fromisoformat(deadline).date()
 
     job = Job(
-        employer_id=employer_id,
+        client_id=client_id,
         category_id=data["category_id"],
         title=data["title"],
         description=data["description"],
@@ -59,15 +59,14 @@ def create_job(data, employer_id):
 
 
 def get_jobs(user_id, user_role):
-    if user_role == "employer":
-        jobs = Job.query.filter_by(employer_id=user_id).all()
+    if user_role == "client":
+        jobs = Job.query.filter_by(client_id=user_id).all()
         return jsonify({"jobs": [j.to_dict() for j in jobs]}), 200
 
     if user_role == "admin":
         jobs = Job.query.all()
         return jsonify({"jobs": [j.to_dict() for j in jobs]}), 200
 
-    # Community admin: only open jobs, community must have 3+ approved members
     admin_community_ids = get_admin_community_ids(user_id)
     eligible_community_ids = []
     for cid in admin_community_ids:
@@ -78,28 +77,28 @@ def get_jobs(user_id, user_role):
         return jsonify({"jobs": []}), 200
 
     jobs = Job.query.filter_by(status="open").all()
-    return jsonify({"jobs": [j.to_dict(strip_employer=True) for j in jobs]}), 200
+    return jsonify({"jobs": [j.to_dict(strip_client=True) for j in jobs]}), 200
 
 
-def get_job(job_id, user_id=None, user_role=None, strip_employer=False):
+def get_job(job_id, user_id=None, user_role=None, strip_client=False):
     job = Job.query.get(job_id)
     if not job:
         return jsonify({"error": "Job not found."}), 404
 
-    if user_role == "employer" and job.employer_id != user_id:
+    if user_role == "client" and job.client_id != user_id:
         return jsonify({"error": "Forbidden."}), 403
 
     if user_role == "user":
-        strip_employer = True
+        strip_client = True
 
-    return jsonify({"job": job.to_dict(strip_employer=strip_employer)}), 200
+    return jsonify({"job": job.to_dict(strip_client=strip_client)}), 200
 
 
-def update_job(job_id, data, employer_id):
+def update_job(job_id, data, client_id):
     job = Job.query.get(job_id)
     if not job:
         return jsonify({"error": "Job not found."}), 404
-    if job.employer_id != employer_id:
+    if job.client_id != client_id:
         return jsonify({"error": "Forbidden."}), 403
     if job.status != "open":
         return jsonify({"error": "Cannot update a non-open job."}), 400
@@ -123,11 +122,11 @@ def update_job(job_id, data, employer_id):
         return jsonify({"error": "Failed to update job."}), 500
 
 
-def delete_job(job_id, employer_id):
+def delete_job(job_id, client_id):
     job = Job.query.get(job_id)
     if not job:
         return jsonify({"error": "Job not found."}), 404
-    if job.employer_id != employer_id:
+    if job.client_id != client_id:
         return jsonify({"error": "Forbidden."}), 403
     try:
         db.session.delete(job)

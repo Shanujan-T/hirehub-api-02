@@ -15,7 +15,7 @@ def seed():
         print("Seed complete — example data loaded from seeders/data/.")
         print()
         print("Platform admin:  admin@hirehub.lk / Password123")
-        print("Employer:        sarah.mitchell@example.com / Password123")
+        print("Client:          sarah.mitchell@example.com / Password123")
         print("Community admin: nadia.hassan@example.com / Password123  (PixelForge Web Dev)")
         print("Member:          priya.nair@example.com / Password123")
 

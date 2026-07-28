@@ -7,7 +7,7 @@ from flask_cors import CORS
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from app.config import Config
-from app.extensions import db, jwt
+from app.extensions import db, jwt, socketio
 from app.models.user_model import User
 from app.routes import register_blueprints
 
@@ -54,12 +54,13 @@ _BLUEPRINT_DEFAULT_GROUP = {
 }
 
 _DESCRIPTIONS = {
-    ("POST", "/api/auth/register"): "Register a new user (user | employer)",
+    ("POST", "/api/auth/register"): "Register a new user (user | client)",
     ("POST", "/api/auth/login"): "Log in and receive a JWT access token",
     ("GET", "/api/auth/me"): "Get current authenticated user profile",
     ("GET", "/api/users"): "List users",
     ("GET", "/api/users/:id"): "Get a single user",
     ("PUT", "/api/users/:id"): "Update a user profile",
+    ("POST", "/api/users/:id/avatar"): "Upload a user avatar image",
     ("DELETE", "/api/users/:id"): "Delete a user",
     ("GET", "/api/skills"): "List all skills",
     ("POST", "/api/skills"): "Create a new skill",
@@ -75,6 +76,7 @@ _DESCRIPTIONS = {
     ("POST", "/api/communities"): "Create a community",
     ("GET", "/api/communities/:id"): "Get a single community",
     ("PUT", "/api/communities/:id"): "Update a community",
+    ("POST", "/api/communities/:id/image"): "Upload a community image",
     ("DELETE", "/api/communities/:id"): "Delete a community",
     ("GET", "/api/community-members/my"): "List my community memberships",
     ("POST", "/api/community-members/join/:id"): "Request to join a community",
@@ -111,7 +113,9 @@ _DESCRIPTIONS = {
     ("POST", "/api/contracts/:id/select-member"): "Select a member for contract",
     ("POST", "/api/contracts/:id/submit-deliverable"): "Submit contract deliverable",
     ("POST", "/api/contracts/:id/admin-approve-deliverable"): "Admin approve submitted deliverable",
-    ("POST", "/api/contracts/:id/employer-approve-deliverable"): "Employer approve submitted deliverable",
+    ("POST", "/api/contracts/:id/client-approve-deliverable"): "Client approve submitted deliverable",
+    ("GET", "/api/contracts/:id/messages"): "List contract conversation messages",
+    ("POST", "/api/contracts/:id/messages"): "Send a contract conversation message",
     ("GET", "/api/contract-applications/my"): "List my contract applications",
     ("POST", "/api/contract-applications/apply"): "Apply to an open contract",
     ("GET", "/api/contract-applications/contract/:id"): "List applications for a contract",
@@ -186,6 +190,7 @@ def create_app():
     CORS(app)
     db.init_app(app)
     jwt.init_app(app)
+    socketio.init_app(app)
 
     @jwt.user_lookup_loader
     def user_lookup_callback(_jwt_header, jwt_data):
@@ -206,7 +211,9 @@ def create_app():
             community_model,
             contract_application_model,
             contract_model,
+            conversation_model,
             job_model,
+            message_model,
             open_call_model,
             open_call_skill_model,
             payment_model,
@@ -225,6 +232,8 @@ def create_app():
             )
 
     register_blueprints(app)
+
+    from . import socket_events  # noqa: F401
 
     @app.route("/")
     def api_home():

@@ -15,8 +15,8 @@ def _validate_auth_payload(data, is_register=False):
         if not data.get("full_name"):
             errors.append("full_name is required.")
         role = data.get("role", "user")
-        if role not in ("user", "employer"):
-            errors.append("role must be 'user' or 'employer'.")
+        if role not in ("user", "client"):
+            errors.append("role must be 'user' or 'client'.")
     else:
         if not data.get("email"):
             errors.append("email is required.")

@@ -10,10 +10,10 @@ def get_payments(user_id, user_role):
         payments = Payment.query.all()
         return jsonify({"payments": [p.to_dict() for p in payments]}), 200
 
-    if user_role == "employer":
+    if user_role == "client":
         from app.models.job_model import Job
         payments = (
-            Payment.query.join(Contract).join(Job).filter(Job.employer_id == user_id).all()
+            Payment.query.join(Contract).join(Job).filter(Job.client_id == user_id).all()
         )
         return jsonify({"payments": [p.to_dict() for p in payments]}), 200
 

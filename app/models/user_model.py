@@ -11,7 +11,7 @@ class User(db.Model):
     email = db.Column(db.String(255), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)
     role = db.Column(
-        db.Enum("admin", "employer", "user", name="user_role"),
+        db.Enum("admin", "client", "user", name="user_role"),
         nullable=False,
         default="user",
     )
@@ -26,7 +26,7 @@ class User(db.Model):
     community_memberships = db.relationship(
         "CommunityMember", back_populates="user", lazy="dynamic"
     )
-    jobs = db.relationship("Job", back_populates="employer", lazy="dynamic")
+    jobs = db.relationship("Job", back_populates="client", lazy="dynamic")
     contract_applications = db.relationship(
         "ContractApplication", back_populates="member", lazy="dynamic"
     )
@@ -41,6 +41,9 @@ class User(db.Model):
         back_populates="reviewer",
         foreign_keys="Review.reviewer_id",
         lazy="dynamic",
+    )
+    sent_messages = db.relationship(
+        "Message", back_populates="sender", lazy="dynamic"
     )
 
     def set_password(self, password):

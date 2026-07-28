@@ -150,7 +150,7 @@ def run_seed(session) -> None:
     for row in _load_json("jobs"):
         session.add(
             Job(
-                employer_id=row["employer_id"],
+                client_id=row["client_id"],
                 category_id=row["category_id"],
                 title=row["title"],
                 description=row["description"],
@@ -170,6 +170,9 @@ def run_seed(session) -> None:
                 job_id=row["job_id"],
                 community_id=row["community_id"],
                 status=row["status"],
+                proposed_cost=Decimal(str(row.get("proposed_cost", 100))),
+                proposed_days=int(row.get("proposed_days", 7)),
+                note=row.get("note"),
                 applied_at=_parse_datetime(row.get("applied_at")) or now,
             )
         )

@@ -13,10 +13,10 @@ from app.utils.pricing_utils import recalc_category_pricing
 
 
 def get_contracts(user_id, user_role):
-    if user_role == "employer":
+    if user_role == "client":
         from app.models.job_model import Job
         contracts = (
-            Contract.query.join(Job).filter(Job.employer_id == user_id).all()
+            Contract.query.join(Job).filter(Job.client_id == user_id).all()
         )
         return jsonify({"contracts": [c.to_dict(include_job=True, include_community=True) for c in contracts]}), 200
 
@@ -42,7 +42,7 @@ def get_contracts(user_id, user_role):
     all_contracts = {c.id: c for c in member_contracts + open_for_member}
     return jsonify({
         "contracts": [
-            c.to_dict(include_job=True, strip_employer=True) for c in all_contracts.values()
+            c.to_dict(include_job=True, strip_client=True) for c in all_contracts.values()
         ]
     }), 200
 
@@ -52,12 +52,12 @@ def get_contract(contract_id, user_id, user_role):
     if not contract:
         return jsonify({"error": "Contract not found."}), 404
 
-    strip_employer = user_role == "user" and not is_community_admin(user_id, contract.community_id)
+    strip_client = user_role == "user" and not is_community_admin(user_id, contract.community_id)
 
-    if user_role == "employer":
+    if user_role == "client":
         from app.models.job_model import Job
         job = Job.query.get(contract.job_id)
-        if not job or job.employer_id != user_id:
+        if not job or job.client_id != user_id:
             return jsonify({"error": "Forbidden."}), 403
 
     if user_role == "user":
@@ -75,7 +75,7 @@ def get_contract(contract_id, user_id, user_role):
     return jsonify({
         "contract": contract.to_dict(
             include_job=True,
-            strip_employer=strip_employer,
+            strip_client=strip_client,
             include_community=True,
         )
     }), 200
@@ -147,14 +147,14 @@ def submit_deliverable(contract_id, user_id, data):
     contract.status = "submitted"
     try:
         db.session.commit()
-        return jsonify({"message": "Deliverable submitted.", "contract": contract.to_dict(strip_employer=True)}), 200
+        return jsonify({"message": "Deliverable submitted.", "contract": contract.to_dict(strip_client=True)}), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to submit deliverable."}), 500
 
 
 def approve_deliverable_admin(contract_id, user_id):
-    """Community admin QA - marks ready for employer review."""
+    """Community admin QA - marks ready for client review."""
     contract = Contract.query.get(contract_id)
     if not contract:
         return jsonify({"error": "Contract not found."}), 404
@@ -162,22 +162,22 @@ def approve_deliverable_admin(contract_id, user_id):
         return jsonify({"error": "Forbidden."}), 403
     if contract.status != "submitted":
         return jsonify({"error": "No deliverable to review."}), 400
-    # Status stays submitted until employer approves
+    # Status stays submitted until the client approves
     try:
         db.session.commit()
-        return jsonify({"message": "Deliverable forwarded to employer.", "contract": contract.to_dict(include_job=True)}), 200
+        return jsonify({"message": "Deliverable forwarded to client.", "contract": contract.to_dict(include_job=True)}), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to approve deliverable."}), 500
 
 
-def approve_deliverable_employer(contract_id, employer_id):
+def approve_deliverable_client(contract_id, client_id):
     contract = Contract.query.get(contract_id)
     if not contract:
         return jsonify({"error": "Contract not found."}), 404
     from app.models.job_model import Job
     job = Job.query.get(contract.job_id)
-    if not job or job.employer_id != employer_id:
+    if not job or job.client_id != client_id:
         return jsonify({"error": "Forbidden."}), 403
     if contract.status != "submitted":
         return jsonify({"error": "No deliverable to approve."}), 400

@@ -21,7 +21,7 @@ def list_jobs():
 
 
 @jobs_bp.route("", methods=["POST"])
-@roles_required("employer", "admin")
+@roles_required("client", "admin")
 def create_job():
     return job_controller.create_job(request.get_json() or {}, get_jwt_identity())
 
@@ -34,12 +34,12 @@ def get_job(job_id):
 
 
 @jobs_bp.route("/<int:job_id>", methods=["PUT"])
-@roles_required("employer")
+@roles_required("client")
 def update_job(job_id):
     return job_controller.update_job(job_id, request.get_json() or {}, get_jwt_identity())
 
 
 @jobs_bp.route("/<int:job_id>", methods=["DELETE"])
-@roles_required("employer")
+@roles_required("client")
 def delete_job(job_id):
     return job_controller.delete_job(job_id, get_jwt_identity())
