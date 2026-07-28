@@ -18,5 +18,6 @@
   {"email": "sofia.alvarez@example.com", "full_name": "Sofia Alvarez", "role": "user", "location": "Matara", "created_at": "2025-06-02", "password": "Password123"},
   {"email": "kwame.boateng@example.com", "full_name": "Kwame Boateng", "role": "user", "location": "Kandy", "created_at": "2025-06-16", "password": "Password123"},
   {"email": "yuki.tanaka@example.com", "full_name": "Yuki Tanaka", "role": "user", "location": "Colombo", "created_at": "2025-07-01", "password": "Password123"},
-  {"email": "hannah.fischer@example.com", "full_name": "Hannah Fischer", "role": "user", "location": "Galle", "created_at": "2025-07-20", "password": "Password123"}
+  {"email": "hannah.fischer@example.com", "full_name": "Hannah Fischer", "role": "user", "location": "Galle", "created_at": "2025-07-20", "password": "Password123"},
+  {"email": "admin@hirehub.lk", "full_name": "Shanu Admin", "role": "admin", "location": "Colombo", "bio": "Platform administrator for HireHub.", "created_at": "2025-01-01", "password": "Password123"}
 ]
