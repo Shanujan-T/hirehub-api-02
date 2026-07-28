@@ -21,33 +21,70 @@ def get_users():
     return jsonify({"users": [u.to_dict(include_stats=True) for u in users]}), 200
 
 
-def get_user(user_id):
+def get_user(user_id, current_user_id=None, current_user_role=None):
     user = User.query.get(user_id)
     if not user:
         return jsonify({"error": "User not found."}), 404
-    return jsonify({"user": user.to_dict(include_stats=True)}), 200
 
-
-def update_user(user_id, data, current_user_id):
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({"error": "User not found."}), 404
-    if user.id != current_user_id:
+    is_admin = current_user_role == "admin"
+    is_self = current_user_id == user_id
+    if not is_admin and not is_self:
         return jsonify({"error": "Forbidden."}), 403
 
-    errors = _validate_user_payload(data, user_id)
-    if errors:
+    include_skills = is_admin and user.role == "user"
+    data = user.to_dict(include_stats=True, include_skills=include_skills)
+
+    if is_admin:
+        from app.models.community_member_model import CommunityMember
+
+        memberships = CommunityMember.query.filter_by(user_id=user_id).all()
+        data["community_memberships"] = []
+        for membership in memberships:
+            row = membership.to_dict()
+            if membership.community:
+                row["community"] = {
+                    "id": membership.community.id,
+                    "name": membership.community.name,
+                }
+            data["community_memberships"].append(row)
+
+    return jsonify({"user": data}), 200
+
+
+def update_user(user_id, data, current_user_id, current_user_role=None):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+
+    is_admin = current_user_role == "admin"
+    is_self = user.id == current_user_id
+
+    if "is_active" in data and not is_admin:
+        return jsonify({"error": "Forbidden."}), 403
+
+    if is_admin and not is_self:
+        if set(data.keys()) - {"is_active"}:
+            return jsonify({"error": "Admins may only change account status for other users."}), 403
+    elif not is_self:
+        return jsonify({"error": "Forbidden."}), 403
+
+    errors = _validate_user_payload(data, user_id if is_self else user_id)
+    if errors and is_self:
         return jsonify({"errors": errors}), 400
 
-    if "full_name" in data:
-        user.full_name = str(data["full_name"]).strip()
-    if "bio" in data:
-        user.bio = data["bio"]
-    if "location" in data:
-        location = data["location"]
-        user.location = location.strip() if isinstance(location, str) and location.strip() else None
-    if "avatar_url" in data:
-        user.avatar_url = data["avatar_url"]
+    if "is_active" in data and is_admin:
+        user.is_active = bool(data["is_active"])
+
+    if is_self:
+        if "full_name" in data:
+            user.full_name = str(data["full_name"]).strip()
+        if "bio" in data:
+            user.bio = data["bio"]
+        if "location" in data:
+            location = data["location"]
+            user.location = location.strip() if isinstance(location, str) and location.strip() else None
+        if "avatar_url" in data:
+            user.avatar_url = data["avatar_url"]
 
     try:
         db.session.commit()
