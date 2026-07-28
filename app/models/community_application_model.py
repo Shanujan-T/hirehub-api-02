@@ -13,6 +13,9 @@ class CommunityApplication(db.Model):
         nullable=False,
         default="applied",
     )
+    proposed_cost = db.Column(db.Numeric(10, 2), nullable=False)
+    proposed_days = db.Column(db.Integer, nullable=False)
+    note = db.Column(db.Text, nullable=True)
     applied_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
     __table_args__ = (db.UniqueConstraint("job_id", "community_id"),)
@@ -26,6 +29,9 @@ class CommunityApplication(db.Model):
             "job_id": self.job_id,
             "community_id": self.community_id,
             "status": self.status,
+            "proposed_cost": float(self.proposed_cost) if self.proposed_cost is not None else 0,
+            "proposed_days": self.proposed_days,
+            "note": self.note,
             "applied_at": self.applied_at.isoformat() if self.applied_at else None,
         }
         if include_community and self.community:
