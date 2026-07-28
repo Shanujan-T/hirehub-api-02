@@ -36,7 +36,6 @@ def register(data):
     user = User(
         email=data["email"],
         full_name=data["full_name"],
-        location=data.get("location"),
         role=data.get("role", "user"),
     )
     user.set_password(data["password"])
