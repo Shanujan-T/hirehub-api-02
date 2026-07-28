@@ -49,7 +49,7 @@ class User(db.Model):
     def check_password(self, password):
         return check_password_hash(self.password, password)
 
-    def to_dict(self, include_stats=False):
+    def to_dict(self, include_stats=False, include_skills=False):
         data = {
             "id": self.id,
             "email": self.email,
@@ -61,6 +61,8 @@ class User(db.Model):
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+        if include_skills:
+            data["user_skills"] = [us.to_dict() for us in self.user_skills.all()]
         if include_stats:
             from app.models.contract_model import Contract
 
