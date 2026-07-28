@@ -11,6 +11,8 @@ def _validate_user_payload(data, user_id=None):
             errors.append("email is required.")
         if not data.get("full_name"):
             errors.append("full_name is required.")
+    elif "full_name" in data and not str(data.get("full_name", "")).strip():
+        errors.append("full_name is required.")
     return errors
 
 
@@ -38,11 +40,12 @@ def update_user(user_id, data, current_user_id):
         return jsonify({"errors": errors}), 400
 
     if "full_name" in data:
-        user.full_name = data["full_name"]
+        user.full_name = str(data["full_name"]).strip()
     if "bio" in data:
         user.bio = data["bio"]
     if "location" in data:
-        user.location = data["location"]
+        location = data["location"]
+        user.location = location.strip() if isinstance(location, str) and location.strip() else None
     if "avatar_url" in data:
         user.avatar_url = data["avatar_url"]
 
