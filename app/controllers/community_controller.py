@@ -9,22 +9,30 @@ from app.utils import utc_now
 
 def _validate_community_payload(data):
     errors = []
-    if not data.get("name"):
+    name = str(data.get("name", "")).strip()
+    if not name:
         errors.append("name is required.")
-    return errors
+    return errors, name
 
 
 def create_community(data, user_id):
-    errors = _validate_community_payload(data)
+    errors, name = _validate_community_payload(data)
     if errors:
         return jsonify({"errors": errors}), 400
-    if Community.query.filter_by(name=data["name"]).first():
-        return jsonify({"error": "Community name already exists."}), 409
+    if Community.query.filter_by(name=name).first():
+        return jsonify({"errors": ["Community name already exists."]}), 400
+
+    description = data.get("description")
+    if isinstance(description, str):
+        description = description.strip() or None
+    location = data.get("location")
+    if isinstance(location, str):
+        location = location.strip() or None
 
     community = Community(
-        name=data["name"],
-        description=data.get("description"),
-        location=data.get("location"),
+        name=name,
+        description=description,
+        location=location,
     )
     db.session.add(community)
     db.session.flush()
