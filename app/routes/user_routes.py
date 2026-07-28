@@ -3,6 +3,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from app.controllers import user_controller
 from app.middleware import roles_required
+from app.models.user_model import User
 
 users_bp = Blueprint("users", __name__, url_prefix="/api/users")
 
@@ -16,13 +17,17 @@ def list_users():
 @users_bp.route("/<int:user_id>", methods=["GET"])
 @jwt_required()
 def get_user(user_id):
-    return user_controller.get_user(user_id)
+    current = User.query.get(int(get_jwt_identity()))
+    return user_controller.get_user(user_id, current.id, current.role)
 
 
 @users_bp.route("/<int:user_id>", methods=["PUT"])
 @jwt_required()
 def update_user(user_id):
-    return user_controller.update_user(user_id, request.get_json() or {}, get_jwt_identity())
+    current = User.query.get(int(get_jwt_identity()))
+    return user_controller.update_user(
+        user_id, request.get_json() or {}, current.id, current.role
+    )
 
 
 @users_bp.route("/<int:user_id>", methods=["DELETE"])
