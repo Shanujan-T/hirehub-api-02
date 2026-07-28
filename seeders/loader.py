@@ -1,0 +1,285 @@
+"""Load 20-row example datasets from seeders/data into the database."""
+
+import json
+from datetime import date, datetime
+from decimal import Decimal
+from pathlib import Path
+from typing import List
+
+from app.models.category_model import Category
+from app.models.category_pricing_model import CategoryPricing
+from app.models.community_application_model import CommunityApplication
+from app.models.community_member_model import CommunityMember
+from app.models.community_model import Community
+from app.models.contract_application_model import ContractApplication
+from app.models.contract_model import Contract
+from app.models.job_model import Job
+from app.models.open_call_model import OpenCall
+from app.models.open_call_skill_model import OpenCallSkill
+from app.models.payment_model import Payment
+from app.models.report_model import Report
+from app.models.review_model import Review
+from app.models.skill_model import Skill
+from app.models.user_model import User
+from app.models.user_skill_model import UserSkill
+from app.utils import utc_now
+
+DATA_DIR = Path(__file__).parent / "data"
+
+LOAD_ORDER = [
+    "users",
+    "skills",
+    "categories",
+    "category_pricing",
+    "communities",
+    "community_members",
+    "user_skills",
+    "jobs",
+    "community_applications",
+    "contracts",
+    "contract_applications",
+    "open_calls",
+    "open_call_skills",
+    "reviews",
+    "payments",
+    "reports",
+]
+
+
+def _load_json(name: str) -> List[dict]:
+    path = DATA_DIR / f"{name}.json"
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _parse_date(value: str) -> date:
+    return date.fromisoformat(value)
+
+
+def _parse_datetime(value: str | None):
+    if not value:
+        return None
+    if "T" in value:
+        return datetime.fromisoformat(value)
+    return datetime.combine(_parse_date(value), datetime.min.time())
+
+
+def run_seed(session) -> None:
+    """Insert all seeder files in FK-safe order. IDs 1–20 align across files."""
+    now = utc_now()
+
+    for row in _load_json("users"):
+        user = User(
+            email=row["email"],
+            full_name=row["full_name"],
+            role=row["role"],
+            location=row.get("location"),
+            bio=row.get("bio"),
+            is_active=row.get("is_active", True),
+            created_at=_parse_datetime(row.get("created_at")) or now,
+        )
+        user.set_password(row.get("password", "Password123"))
+        session.add(user)
+
+    session.flush()
+
+    for row in _load_json("skills"):
+        session.add(
+            Skill(
+                name=row["name"],
+                category=row.get("category"),
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("categories"):
+        session.add(Category(name=row["name"]))
+
+    session.flush()
+
+    for row in _load_json("category_pricing"):
+        session.add(
+            CategoryPricing(
+                category_id=row["category_id"],
+                location=row["location"],
+                average_price=Decimal(str(row["average_price"])),
+                sample_size=row["sample_size"],
+                last_updated=_parse_datetime(row.get("last_updated")) or now,
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("communities"):
+        session.add(
+            Community(
+                name=row["name"],
+                description=row.get("description"),
+                location=row.get("location"),
+                reputation_score=row.get("reputation_score", 0.0),
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("community_members"):
+        session.add(
+            CommunityMember(
+                community_id=row["community_id"],
+                user_id=row["user_id"],
+                role=row["role"],
+                status=row["status"],
+                joined_at=_parse_datetime(row.get("joined_at")) or now,
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("user_skills"):
+        session.add(
+            UserSkill(
+                user_id=row["user_id"],
+                skill_id=row["skill_id"],
+                level=row["level"],
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("jobs"):
+        session.add(
+            Job(
+                employer_id=row["employer_id"],
+                category_id=row["category_id"],
+                title=row["title"],
+                description=row["description"],
+                location=row["location"],
+                deadline=_parse_date(row["deadline"]),
+                suggested_price=Decimal(str(row["suggested_price"])) if row.get("suggested_price") is not None else None,
+                final_price=Decimal(str(row["final_price"])),
+                status=row["status"],
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("community_applications"):
+        session.add(
+            CommunityApplication(
+                job_id=row["job_id"],
+                community_id=row["community_id"],
+                status=row["status"],
+                applied_at=_parse_datetime(row.get("applied_at")) or now,
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("contracts"):
+        session.add(
+            Contract(
+                job_id=row["job_id"],
+                community_id=row["community_id"],
+                assigned_member_id=row.get("assigned_member_id"),
+                total_amount=Decimal(str(row["total_amount"])),
+                commission_percent=Decimal(str(row.get("commission_percent", 3))),
+                commission_amount=Decimal(str(row["commission_amount"])) if row.get("commission_amount") is not None else None,
+                member_payout=Decimal(str(row["member_payout"])) if row.get("member_payout") is not None else None,
+                status=row["status"],
+                deliverable_url=row.get("deliverable_url"),
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("contract_applications"):
+        session.add(
+            ContractApplication(
+                contract_id=row["contract_id"],
+                member_id=row["member_id"],
+                note=row.get("note"),
+                status=row["status"],
+                applied_at=_parse_datetime(row.get("applied_at")) or now,
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("open_calls"):
+        session.add(
+            OpenCall(
+                community_id=row["community_id"],
+                title=row["title"],
+                status=row["status"],
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("open_call_skills"):
+        session.add(
+            OpenCallSkill(
+                open_call_id=row["open_call_id"],
+                skill_id=row["skill_id"],
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("reviews"):
+        session.add(
+            Review(
+                contract_id=row["contract_id"],
+                reviewer_id=row["reviewer_id"],
+                community_id=row["community_id"],
+                member_id=row.get("member_id"),
+                rating=row["rating"],
+                comment=row.get("comment"),
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("payments"):
+        session.add(
+            Payment(
+                contract_id=row["contract_id"],
+                total_amount=Decimal(str(row["total_amount"])),
+                commission_amount=Decimal(str(row["commission_amount"])),
+                commission_recipient=row.get("commission_recipient", "admin"),
+                member_payout=Decimal(str(row["member_payout"])),
+                status=row["status"],
+                released_at=_parse_datetime(row.get("released_at")),
+            )
+        )
+
+    session.flush()
+
+    for row in _load_json("reports"):
+        session.add(
+            Report(
+                reporter_id=row["reporter_id"],
+                contract_id=row.get("contract_id"),
+                reason=row["reason"],
+                status=row["status"],
+            )
+        )
+
+    session.flush()
+
+    _refresh_community_reputation(session)
+
+
+def _refresh_community_reputation(session) -> None:
+    from sqlalchemy import func
+
+    averages = (
+        session.query(Review.community_id, func.avg(Review.rating))
+        .group_by(Review.community_id)
+        .all()
+    )
+    for community_id, avg_rating in averages:
+        community = session.get(Community, community_id)
+        if community and avg_rating is not None:
+            community.reputation_score = round(float(avg_rating), 2)
