@@ -25,7 +25,7 @@ class CommunityMember(db.Model):
     community = db.relationship("Community", back_populates="members")
     user = db.relationship("User", back_populates="community_memberships")
 
-    def to_dict(self, include_user=False):
+    def to_dict(self, include_user=False, include_user_skills=False):
         data = {
             "id": self.id,
             "community_id": self.community_id,
@@ -35,5 +35,8 @@ class CommunityMember(db.Model):
             "joined_at": self.joined_at.isoformat() if self.joined_at else None,
         }
         if include_user and self.user:
-            data["user"] = self.user.to_dict(include_stats=True)
+            data["user"] = self.user.to_dict(
+                include_stats=True,
+                include_skills=include_user_skills,
+            )
         return data
