@@ -1,4 +1,4 @@
-"""Seed HireHub database from seeders/data JSON files (20 rows per entity)."""
+"""Seed HireHub database from seeders/data JSON files."""
 
 from app import create_app
 from app.extensions import db
@@ -12,9 +12,12 @@ def seed():
         db.create_all()
         run_seed(db.session)
         db.session.commit()
-        print("Seed complete — 20 example rows loaded per entity from seeders/data/.")
-        print("Sample login: sarah.mitchell@example.com / Password123 (employer)")
-        print("Sample admin:  nadia.hassan@example.com / Password123 (community admin on C1)")
+        print("Seed complete — example data loaded from seeders/data/.")
+        print()
+        print("Platform admin:  admin@hirehub.lk / Password123")
+        print("Employer:        sarah.mitchell@example.com / Password123")
+        print("Community admin: nadia.hassan@example.com / Password123  (PixelForge Web Dev)")
+        print("Member:          priya.nair@example.com / Password123")
 
 
 if __name__ == "__main__":
