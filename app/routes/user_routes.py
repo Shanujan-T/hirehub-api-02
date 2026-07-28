@@ -30,6 +30,14 @@ def update_user(user_id):
     )
 
 
+@users_bp.route("/<int:user_id>/avatar", methods=["POST"])
+@jwt_required()
+def upload_avatar(user_id):
+    current = User.query.get(int(get_jwt_identity()))
+    file_storage = request.files.get("image")
+    return user_controller.upload_avatar(user_id, current.id, current.role, file_storage)
+
+
 @users_bp.route("/<int:user_id>", methods=["DELETE"])
 @jwt_required()
 def delete_user(user_id):

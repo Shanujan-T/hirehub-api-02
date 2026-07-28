@@ -5,6 +5,7 @@ from app.middleware import get_admin_community_ids
 from app.models.community_member_model import CommunityMember
 from app.models.community_model import Community
 from app.utils import utc_now
+from app.utils.cloudinary_client import upload_image
 
 
 def _validate_community_payload(data):
@@ -105,3 +106,33 @@ def delete_community(community_id, user_id):
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to delete community."}), 500
+
+
+def upload_community_image(community_id, user_id, file_storage):
+    community = Community.query.get(community_id)
+    if not community:
+        return jsonify({"error": "Community not found."}), 404
+
+    admin_ids = get_admin_community_ids(user_id)
+    if community_id not in admin_ids:
+        return jsonify({"error": "Forbidden."}), 403
+
+    try:
+        image_url = upload_image(file_storage, "hirehub/communities")
+    except ValueError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception:
+        return jsonify({"error": "Failed to upload community image."}), 500
+
+    community.image_url = image_url
+    try:
+        db.session.commit()
+        return jsonify({
+            "message": "Community image updated.",
+            "community": community.to_dict(include_member_count=True),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to save community image."}), 500

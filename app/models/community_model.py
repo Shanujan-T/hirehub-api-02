@@ -9,6 +9,7 @@ class Community(db.Model):
     name = db.Column(db.String(255), unique=True, nullable=False)
     description = db.Column(db.Text, nullable=True)
     location = db.Column(db.String(255), nullable=True)
+    image_url = db.Column(db.String(512), nullable=True)
     reputation_score = db.Column(db.Float, default=0.0, nullable=False)
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
@@ -28,6 +29,7 @@ class Community(db.Model):
             "name": self.name,
             "description": self.description,
             "location": self.location,
+            "image_url": self.image_url,
             "reputation_score": self.reputation_score,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

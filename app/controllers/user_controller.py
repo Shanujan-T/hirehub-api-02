@@ -2,6 +2,7 @@ from flask import jsonify
 
 from app.extensions import db
 from app.models.user_model import User
+from app.utils.cloudinary_client import upload_image
 
 
 def _validate_user_payload(data, user_id=None):
@@ -92,6 +93,34 @@ def update_user(user_id, data, current_user_id, current_user_role=None):
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to update user."}), 500
+
+
+def upload_avatar(user_id, current_user_id, current_user_role, file_storage):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+
+    is_admin = current_user_role == "admin"
+    is_self = user.id == current_user_id
+    if not is_admin and not is_self:
+        return jsonify({"error": "Forbidden."}), 403
+
+    try:
+        avatar_url = upload_image(file_storage, "hirehub/users")
+    except ValueError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception:
+        return jsonify({"error": "Failed to upload avatar."}), 500
+
+    user.avatar_url = avatar_url
+    try:
+        db.session.commit()
+        return jsonify({"message": "Avatar updated.", "user": user.to_dict(include_stats=True)}), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to save avatar."}), 500
 
 
 def delete_user(user_id, current_user_id):
