@@ -55,6 +55,10 @@ def apply_to_job(job_id, community_id, user_id, data=None):
     if not is_community_admin(user_id, community_id):
         return jsonify({"error": "Forbidden."}), 403
 
+    community = Community.query.get(community_id)
+    if not community or community.status != "approved":
+        return jsonify({"error": "Community must be approved before applying to jobs."}), 403
+
     if not community_meets_minimum(community_id):
         return jsonify({"error": f"Community must have at least {MIN_COMMUNITY_MEMBERS} approved members."}), 400
 

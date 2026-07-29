@@ -1,23 +1,63 @@
 from flask import jsonify
 
 from app.extensions import db
-from app.middleware import get_admin_community_ids
+from app.middleware import get_admin_community_ids, is_community_admin
+from app.models.category_model import Category
 from app.models.community_member_model import CommunityMember
 from app.models.community_model import Community
+from app.models.user_model import User
 from app.utils import utc_now
 from app.utils.cloudinary_client import upload_image
 
+VALID_EXPERIENCE_LEVELS = {"less_than_1_year", "1_to_3_years", "3_plus_years"}
 
-def _validate_community_payload(data):
+
+def _validate_community_payload(data, *, require_review_fields=False):
     errors = []
     name = str(data.get("name", "")).strip()
     if not name:
         errors.append("name is required.")
+
+    if require_review_fields:
+        category_id = data.get("category_id")
+        if not category_id:
+            errors.append("category_id is required.")
+        elif not Category.query.get(category_id):
+            errors.append("category_id is invalid.")
+        experience_level = data.get("experience_level")
+        if not experience_level:
+            errors.append("experience_level is required.")
+        elif experience_level not in VALID_EXPERIENCE_LEVELS:
+            errors.append("experience_level is invalid.")
+        if not data.get("terms_accepted"):
+            errors.append("terms_accepted must be true.")
+
     return errors, name
 
 
+def _community_admin_user(community_id):
+    membership = CommunityMember.query.filter_by(
+        community_id=community_id, role="admin", status="approved"
+    ).first()
+    if not membership or not membership.user:
+        membership = CommunityMember.query.filter_by(
+            community_id=community_id, role="admin"
+        ).order_by(CommunityMember.id.asc()).first()
+    return membership.user if membership else None
+
+
+def _community_dict(community, **kwargs):
+    return community.to_dict(**kwargs)
+
+
 def create_community(data, user_id):
-    errors, name = _validate_community_payload(data)
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+    if user.identity_status != "verified":
+        return jsonify({"error": "Identity verification required before creating a community."}), 403
+
+    errors, name = _validate_community_payload(data, require_review_fields=True)
     if errors:
         return jsonify({"errors": errors}), 400
     if Community.query.filter_by(name=name).first():
@@ -30,10 +70,34 @@ def create_community(data, user_id):
     if isinstance(location, str):
         location = location.strip() or None
 
+    specialization = data.get("specialization")
+    if isinstance(specialization, str):
+        specialization = specialization.strip() or None
+
+    admin_bio = data.get("admin_bio")
+    if isinstance(admin_bio, str):
+        admin_bio = admin_bio.strip() or None
+
+    contact_phone = data.get("contact_phone")
+    if isinstance(contact_phone, str):
+        contact_phone = contact_phone.strip() or None
+
+    portfolio_links = data.get("portfolio_links") or []
+    if not isinstance(portfolio_links, list):
+        return jsonify({"errors": ["portfolio_links must be an array."]}), 400
+    portfolio_links = [str(link).strip() for link in portfolio_links if str(link).strip()]
+
     community = Community(
         name=name,
         description=description,
         location=location,
+        category_id=int(data["category_id"]),
+        experience_level=data["experience_level"],
+        specialization=specialization,
+        portfolio_links=portfolio_links or None,
+        admin_bio=admin_bio,
+        contact_phone=contact_phone,
+        status="pending",
     )
     db.session.add(community)
     db.session.flush()
@@ -48,26 +112,64 @@ def create_community(data, user_id):
     db.session.add(membership)
     try:
         db.session.commit()
-        return jsonify({"message": "Community created.", "community": community.to_dict(include_member_count=True)}), 201
+        return jsonify({
+            "message": "Community submitted for review.",
+            "community": _community_dict(community, include_member_count=True, include_category=True),
+        }), 201
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to create community."}), 500
 
 
-def get_communities():
-    communities = Community.query.all()
-    return jsonify({"communities": [c.to_dict(include_member_count=True) for c in communities]}), 200
+def get_communities(current_user_role=None, status_filter=None):
+    query = Community.query
+    if current_user_role == "admin":
+        if status_filter:
+            query = query.filter_by(status=status_filter)
+    else:
+        query = query.filter_by(status="approved")
+
+    communities = query.order_by(Community.created_at.desc()).all()
+    return jsonify({
+        "communities": [
+            _community_dict(c, include_member_count=True, include_category=True) for c in communities
+        ]
+    }), 200
 
 
-def get_community(community_id):
+def get_community(community_id, current_user_id=None, current_user_role=None):
     community = Community.query.get(community_id)
     if not community:
         return jsonify({"error": "Community not found."}), 404
-    data = community.to_dict(include_member_count=True)
+
+    is_admin = current_user_role == "admin"
+    is_member = False
+    if current_user_id:
+        is_member = (
+            CommunityMember.query.filter_by(
+                community_id=community_id,
+                user_id=current_user_id,
+                status="approved",
+            ).first()
+            is not None
+        )
+
+    if community.status != "approved" and not is_admin and not is_member:
+        return jsonify({"error": "Community not found."}), 404
+
+    data = _community_dict(community, include_member_count=True, include_category=True)
     members = CommunityMember.query.filter_by(
         community_id=community_id, status="approved"
     ).all()
-    data["members"] = [m.to_dict(include_user=True, include_user_skills=True) for m in members]
+    data["members"] = [
+        m.to_dict(include_user=True, include_user_skills=True) for m in members
+    ]
+
+    if is_admin:
+        admin_user = _community_admin_user(community_id)
+        if admin_user:
+            data["admin_user"] = admin_user.to_dict(viewer_role="admin", include_stats=True)
+
     return jsonify({"community": data}), 200
 
 
@@ -78,6 +180,8 @@ def update_community(community_id, data, user_id):
     admin_ids = get_admin_community_ids(user_id)
     if community_id not in admin_ids:
         return jsonify({"error": "Forbidden."}), 403
+    if "category_id" in data:
+        return jsonify({"error": "category_id cannot be changed."}), 400
     if "name" in data:
         community.name = data["name"]
     if "description" in data:
@@ -86,10 +190,42 @@ def update_community(community_id, data, user_id):
         community.location = data["location"]
     try:
         db.session.commit()
-        return jsonify({"message": "Community updated.", "community": community.to_dict(include_member_count=True)}), 200
+        return jsonify({
+            "message": "Community updated.",
+            "community": _community_dict(community, include_member_count=True, include_category=True),
+        }), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to update community."}), 500
+
+
+def review_community(community_id, data):
+    community = Community.query.get(community_id)
+    if not community:
+        return jsonify({"error": "Community not found."}), 404
+
+    approve = bool(data.get("approve"))
+    reason = data.get("reason")
+    if isinstance(reason, str):
+        reason = reason.strip() or None
+
+    if approve:
+        community.status = "approved"
+        community.rejection_reason = None
+    else:
+        community.status = "rejected"
+        community.rejection_reason = reason
+
+    try:
+        db.session.commit()
+        payload = _community_dict(community, include_member_count=True, include_category=True)
+        admin_user = _community_admin_user(community_id)
+        if admin_user:
+            payload["admin_user"] = admin_user.to_dict(viewer_role="admin", include_stats=True)
+        return jsonify({"message": "Community reviewed.", "community": payload}), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to review community."}), 500
 
 
 def delete_community(community_id, user_id):
@@ -131,7 +267,7 @@ def upload_community_image(community_id, user_id, file_storage):
         db.session.commit()
         return jsonify({
             "message": "Community image updated.",
-            "community": community.to_dict(include_member_count=True),
+            "community": _community_dict(community, include_member_count=True, include_category=True),
         }), 200
     except Exception:
         db.session.rollback()

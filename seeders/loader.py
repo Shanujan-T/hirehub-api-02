@@ -117,6 +117,13 @@ def run_seed(session) -> None:
                 name=row["name"],
                 description=row.get("description"),
                 location=row.get("location"),
+                category_id=row.get("category_id", 1),
+                experience_level=row.get("experience_level", "1_to_3_years"),
+                specialization=row.get("specialization"),
+                portfolio_links=row.get("portfolio_links"),
+                admin_bio=row.get("admin_bio"),
+                contact_phone=row.get("contact_phone"),
+                status=row.get("status", "approved"),
                 reputation_score=row.get("reputation_score", 0.0),
             )
         )

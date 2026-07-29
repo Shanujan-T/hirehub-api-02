@@ -3,10 +3,15 @@ from flask import jsonify
 from app.extensions import db
 from app.middleware import is_community_admin
 from app.models.community_member_model import CommunityMember
+from app.models.community_model import Community
 from app.utils import utc_now
 
 
 def request_join(community_id, user_id):
+    community = Community.query.get(community_id)
+    if not community or community.status != "approved":
+        return jsonify({"error": "Community is not available for join requests."}), 400
+
     existing = CommunityMember.query.filter_by(
         community_id=community_id, user_id=user_id
     ).first()
@@ -43,7 +48,13 @@ def get_community_members(community_id, status=None):
 
 def get_my_memberships(user_id):
     memberships = CommunityMember.query.filter_by(user_id=user_id).all()
-    return jsonify({"community_members": [m.to_dict() for m in memberships]}), 200
+    result = []
+    for membership in memberships:
+        row = membership.to_dict()
+        if membership.community:
+            row["community"] = membership.community.to_dict(include_category=True)
+        result.append(row)
+    return jsonify({"community_members": result}), 200
 
 
 def approve_member(membership_id, admin_user_id, action):

@@ -11,6 +11,7 @@ class Category(db.Model):
 
     pricing = db.relationship("CategoryPricing", back_populates="category", lazy="dynamic")
     jobs = db.relationship("Job", back_populates="category", lazy="dynamic")
+    communities = db.relationship("Community", back_populates="category", lazy="dynamic")
 
     def to_dict(self):
         return {
