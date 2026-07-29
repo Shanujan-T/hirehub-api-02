@@ -1,137 +1,153 @@
 from datetime import datetime
-from decimal import Decimal
 
-from flask import jsonify
+from flask import jsonify, request
+from flask_jwt_extended import get_jwt_identity
 
 from app.extensions import db
-from app.middleware import community_meets_minimum, get_admin_community_ids
+from app.middleware import can_browse_job_marketplace
+from app.models.category_model import Category
+from app.models.community_application_model import CommunityApplication
+from app.models.contract_model import Contract
 from app.models.job_model import Job
-from app.utils.pricing_utils import get_pricing_suggestion
+from app.models.user_model import User
 
 
-def _validate_job_payload(data):
-    errors = []
-    if not data.get("title"):
-        errors.append("title is required.")
-    if not data.get("description"):
-        errors.append("description is required.")
-    if not data.get("category_id"):
-        errors.append("category_id is required.")
-    if not data.get("location"):
-        errors.append("location is required.")
-    if not data.get("deadline"):
-        errors.append("deadline is required.")
-    if not data.get("final_price"):
-        errors.append("final_price is required.")
-    return errors
+def create_job():
+    user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
 
+    required = ["category_id", "title", "description", "location", "deadline", "final_price"]
+    for field in required:
+        if field not in data:
+            return jsonify({"error": f"Missing required field: {field}"}), 400
 
-def create_job(data, client_id):
-    errors = _validate_job_payload(data)
-    if errors:
-        return jsonify({"errors": errors}), 400
+    category = Category.query.get(data["category_id"])
+    if not category:
+        return jsonify({"error": "Invalid category."}), 400
 
-    pricing = get_pricing_suggestion(data["category_id"], data["location"])
-    suggested = pricing["average_price"]
-
-    deadline = data["deadline"]
-    if isinstance(deadline, str):
-        deadline = datetime.fromisoformat(deadline).date()
+    try:
+        deadline = datetime.strptime(data["deadline"], "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"error": "Invalid deadline format. Use YYYY-MM-DD."}), 400
 
     job = Job(
-        client_id=client_id,
+        posted_by_id=user_id,
         category_id=data["category_id"],
         title=data["title"],
         description=data["description"],
         location=data["location"],
         deadline=deadline,
-        suggested_price=Decimal(str(suggested)) if suggested is not None else None,
-        final_price=Decimal(str(data["final_price"])),
+        suggested_price=data.get("suggested_price"),
+        final_price=data["final_price"],
         status="open",
     )
     db.session.add(job)
-    try:
-        db.session.commit()
-        return jsonify({"message": "Job created.", "job": job.to_dict()}), 201
-    except Exception:
-        db.session.rollback()
-        return jsonify({"error": "Failed to create job."}), 500
+    db.session.commit()
+
+    return jsonify({"message": "Job created.", "job": job.to_dict()}), 201
 
 
-def get_jobs(user_id, user_role):
-    if user_role == "client":
-        jobs = Job.query.filter_by(client_id=user_id).all()
-        return jsonify({"jobs": [j.to_dict() for j in jobs]}), 200
+def get_jobs():
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    marketplace = request.args.get("marketplace", "").lower() in ("1", "true", "yes")
 
-    if user_role == "admin":
-        jobs = Job.query.all()
-        return jsonify({"jobs": [j.to_dict() for j in jobs]}), 200
+    if marketplace:
+        if not can_browse_job_marketplace(user_id):
+            return (
+                jsonify(
+                    {
+                        "error": "Job marketplace is available only to community admins "
+                        "of communities with at least 3 approved members."
+                    }
+                ),
+                403,
+            )
+        query = Job.query.filter_by(status="open")
+        jobs = query.order_by(Job.created_at.desc()).all()
+        return jsonify({"jobs": [j.to_dict(include_poster=True) for j in jobs]}), 200
 
-    admin_community_ids = get_admin_community_ids(user_id)
-    eligible_community_ids = []
-    for cid in admin_community_ids:
-        if community_meets_minimum(cid):
-            eligible_community_ids.append(cid)
+    if user and user.role == "admin":
+        jobs = Job.query.order_by(Job.created_at.desc()).all()
+        return jsonify({"jobs": [j.to_dict(include_poster=True) for j in jobs]}), 200
 
-    if not eligible_community_ids:
-        return jsonify({"jobs": []}), 200
+    jobs = (
+        Job.query.filter_by(posted_by_id=user_id)
+        .order_by(Job.created_at.desc())
+        .all()
+    )
+    return jsonify({"jobs": [j.to_dict() for j in jobs]}), 200
 
-    jobs = Job.query.filter_by(status="open").all()
-    return jsonify({"jobs": [j.to_dict(strip_client=True) for j in jobs]}), 200
 
-
-def get_job(job_id, user_id=None, user_role=None, strip_client=False):
+def get_job(job_id):
+    user_id = int(get_jwt_identity())
     job = Job.query.get(job_id)
     if not job:
         return jsonify({"error": "Job not found."}), 404
 
-    if user_role == "client" and job.client_id != user_id:
-        return jsonify({"error": "Forbidden."}), 403
+    if job.posted_by_id == user_id:
+        return jsonify({"job": job.to_dict(include_poster=True)}), 200
 
-    if user_role == "user":
-        strip_client = True
+    if job.status == "open" and can_browse_job_marketplace(user_id):
+        return jsonify({"job": job.to_dict(include_poster=True)}), 200
 
-    return jsonify({"job": job.to_dict(strip_client=strip_client)}), 200
+    return jsonify({"error": "Forbidden."}), 403
 
 
-def update_job(job_id, data, client_id):
+def update_job(job_id):
+    user_id = int(get_jwt_identity())
     job = Job.query.get(job_id)
     if not job:
         return jsonify({"error": "Job not found."}), 404
-    if job.client_id != client_id:
+    if job.posted_by_id != user_id:
         return jsonify({"error": "Forbidden."}), 403
     if job.status != "open":
-        return jsonify({"error": "Cannot update a non-open job."}), 400
+        return jsonify({"error": "Only open jobs can be updated."}), 400
 
-    for field in ("title", "description", "location"):
+    data = request.get_json() or {}
+    for field in ("title", "description", "location", "final_price", "suggested_price"):
         if field in data:
             setattr(job, field, data[field])
-    if "final_price" in data:
-        job.final_price = Decimal(str(data["final_price"]))
     if "deadline" in data:
-        deadline = data["deadline"]
-        if isinstance(deadline, str):
-            deadline = datetime.fromisoformat(deadline).date()
-        job.deadline = deadline
+        try:
+            job.deadline = datetime.strptime(data["deadline"], "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"error": "Invalid deadline format."}), 400
+    if "category_id" in data:
+        if not Category.query.get(data["category_id"]):
+            return jsonify({"error": "Invalid category."}), 400
+        job.category_id = data["category_id"]
 
-    try:
-        db.session.commit()
-        return jsonify({"message": "Job updated.", "job": job.to_dict()}), 200
-    except Exception:
-        db.session.rollback()
-        return jsonify({"error": "Failed to update job."}), 500
+    db.session.commit()
+    return jsonify({"message": "Job updated.", "job": job.to_dict()}), 200
 
 
-def delete_job(job_id, client_id):
+def delete_job(job_id):
+    user_id = int(get_jwt_identity())
     job = Job.query.get(job_id)
     if not job:
         return jsonify({"error": "Job not found."}), 404
-    if job.client_id != client_id:
+    if job.posted_by_id != user_id:
         return jsonify({"error": "Forbidden."}), 403
-    try:
-        db.session.delete(job)
-        db.session.commit()
-        return jsonify({"message": "Job deleted."}), 200
-    except Exception:
-        db.session.rollback()
-        return jsonify({"error": "Failed to delete job."}), 500
+    if job.status != "open":
+        return jsonify({"error": "Only open jobs can be deleted."}), 400
+
+    db.session.delete(job)
+    db.session.commit()
+    return jsonify({"message": "Job deleted."}), 200
+
+
+def get_job_applications(job_id):
+    user_id = int(get_jwt_identity())
+    job = Job.query.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found."}), 404
+    if job.posted_by_id != user_id:
+        return jsonify({"error": "Forbidden."}), 403
+
+    applications = (
+        CommunityApplication.query.filter_by(job_id=job_id)
+        .order_by(CommunityApplication.created_at.desc())
+        .all()
+    )
+    return jsonify({"applications": [a.to_dict(include_community=True) for a in applications]}), 200
