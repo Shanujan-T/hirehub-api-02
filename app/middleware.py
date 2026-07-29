@@ -97,6 +97,14 @@ def get_admin_community_ids(user_id):
     return [m.community_id for m in memberships]
 
 
+def can_browse_job_marketplace(user_id):
+    """True if user admins at least one community with the minimum member count."""
+    for community_id in get_admin_community_ids(user_id):
+        if community_meets_minimum(community_id):
+            return True
+    return False
+
+
 MIN_COMMUNITY_MEMBERS = 3
 
 
