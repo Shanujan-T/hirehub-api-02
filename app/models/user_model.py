@@ -143,10 +143,7 @@ class User(db.Model):
         return check_password_hash(self.password, password)
 
     def sync_identity_verification_status(self):
-        """Instant verification when phone or email OTP check is complete."""
-        if self.phone_verified_at or self.email_verified_at:
-            self.identity_status = "verified"
-            self.identity_rejection_reason = None
+        """OTP phone/email flags only — identity_status is set via NIC admin review."""
 
     def identity_email_verified(self) -> bool:
         return self.email_verified_at is not None
