@@ -15,9 +15,9 @@ def dev_expose_codes() -> bool:
 
 
 def send_identity_email_otp(email: str, code: str) -> None:
-    subject = "Your HireHub verification code"
+    subject = "Your HireHub account verification code"
     body = (
-        f"Your HireHub identity verification code is: {code}\n\n"
+        f"Your HireHub account verification code is: {code}\n\n"
         "It expires in 10 minutes. If you did not request this, you can ignore this email."
     )
 

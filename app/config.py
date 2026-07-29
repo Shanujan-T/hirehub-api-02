@@ -32,10 +32,17 @@ def _build_database_uri() -> str:
             f"{mysql_host}:{mysql_port}/{mysql_database}"
         )
 
+    host = os.getenv("DB_HOST", "127.0.0.1")
+    if os.getenv("RAILWAY_ENVIRONMENT") and host in ("localhost", "127.0.0.1"):
+        raise RuntimeError(
+            "Database not configured on Railway: link the MySQL plugin to this service "
+            "or set DATABASE_URL / MYSQLHOST (DB_HOST=localhost only works locally)."
+        )
+
     return (
         f"mysql+pymysql://{os.getenv('DB_USER', 'root')}:"
         f"{quote_plus(os.getenv('DB_PASSWORD', ''))}@"
-        f"{os.getenv('DB_HOST', '127.0.0.1')}/"
+        f"{host}/"
         f"{os.getenv('DB_NAME', 'hirehub')}"
     )
 
@@ -44,6 +51,10 @@ class Config:
     SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key")
     SQLALCHEMY_DATABASE_URI = _build_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE_SECONDS", "280")),
+    }
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(
         minutes=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_MINUTES", "1440"))

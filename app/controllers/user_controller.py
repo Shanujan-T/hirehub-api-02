@@ -6,11 +6,31 @@ from app.extensions import db
 from app.models.user_model import User
 from app.models.verification_otp_model import VerificationOtp
 from app.utils import utc_now
-from app.utils.cloudinary_client import upload_image
+from app.utils.cloudinary_client import upload_document, upload_image
+from app.utils.nic_encryption import encrypt_nic, validate_nic_format
 from app.utils.otp_delivery import dev_expose_codes, send_identity_email_otp, send_identity_sms_otp
 from app.utils.otp_utils import generate_otp_code, hash_otp_code, otp_expires_at, verify_otp_code
 
 _PHONE_RE = re.compile(r"^\+?[0-9]{8,15}$")
+
+_ADDRESS_FIELDS = (
+    "address_line1",
+    "address_line2",
+    "address_city",
+    "address_region",
+    "address_postal_code",
+)
+
+
+def _optional_str(value, *, max_len: int) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+    return trimmed[:max_len]
 
 
 def _validate_user_payload(data, user_id=None):
@@ -106,6 +126,16 @@ def update_user(user_id, data, current_user_id, current_user_role=None):
             user.location = location.strip() if isinstance(location, str) and location.strip() else None
         if "avatar_url" in data:
             user.avatar_url = data["avatar_url"]
+        limits = {
+            "address_line1": 255,
+            "address_line2": 255,
+            "address_city": 128,
+            "address_region": 128,
+            "address_postal_code": 32,
+        }
+        for field in _ADDRESS_FIELDS:
+            if field in data:
+                setattr(user, field, _optional_str(data.get(field), max_len=limits[field]))
 
     try:
         db.session.commit()
@@ -190,21 +220,69 @@ def _consume_otp(user_id: int, purpose: str, code: str) -> bool:
 
 def _identity_user_response(user, user_id):
     return jsonify({
-        "message": "Identity verification updated.",
+        "message": "Account verification updated.",
         "user": _user_dict(user, viewer_id=user_id, viewer_role=user.role, include_stats=True),
     }), 200
 
 
 def upload_nic_document(user_id, file_storage):
-    return jsonify({
-        "error": "NIC document upload is no longer supported. Verify with phone and email OTP on your profile.",
-    }), 410
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+
+    try:
+        document_url = upload_document(file_storage, "hirehub/identity")
+    except ValueError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception:
+        return jsonify({"error": "Failed to upload identity document."}), 500
+
+    return jsonify({"nic_document_url": document_url}), 200
 
 
 def submit_identity_verification(user_id, data):
-    return jsonify({
-        "error": "Use phone and email OTP identity verification endpoints instead.",
-    }), 410
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+
+    nic_number = str(data.get("nic_number", "")).strip()
+    nic_document_url = str(data.get("nic_document_url", "")).strip()
+
+    errors = []
+    if not nic_number:
+        errors.append("nic_number is required.")
+    elif not validate_nic_format(nic_number):
+        errors.append("nic_number format is invalid.")
+    if not nic_document_url:
+        errors.append("nic_document_url is required.")
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    if user.identity_status == "verified":
+        return jsonify({"error": "Identity is already verified."}), 400
+    if user.identity_status == "pending":
+        return jsonify({"error": "Identity verification is already pending review."}), 400
+
+    try:
+        user.nic_number = encrypt_nic(nic_number)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+
+    user.nic_document_url = nic_document_url
+    user.identity_status = "pending"
+    user.identity_rejection_reason = None
+
+    try:
+        db.session.commit()
+        return jsonify({
+            "message": "Identity verification submitted.",
+            "user": _user_dict(user, viewer_id=user_id, viewer_role=user.role, include_stats=True),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to submit identity verification."}), 500
 
 
 def send_identity_phone_otp(user_id, data):
@@ -212,7 +290,7 @@ def send_identity_phone_otp(user_id, data):
     if not user:
         return jsonify({"error": "User not found."}), 404
     if user.identity_status == "verified":
-        return jsonify({"error": "Identity is already verified."}), 400
+        return jsonify({"error": "Account is already verified."}), 400
 
     phone = _normalize_phone(data.get("phone_number", ""))
     if not phone:
@@ -240,7 +318,7 @@ def confirm_identity_phone_otp(user_id, data):
     if not user:
         return jsonify({"error": "User not found."}), 404
     if user.identity_status == "verified":
-        return jsonify({"error": "Identity is already verified."}), 400
+        return jsonify({"error": "Account is already verified."}), 400
 
     code = str(data.get("code", "")).strip()
     if not code:
@@ -250,8 +328,6 @@ def confirm_identity_phone_otp(user_id, data):
 
     user.phone_verified_at = utc_now()
     user.sync_identity_verification_status()
-    if user.identity_status != "verified":
-        user.identity_status = "unverified"
 
     try:
         db.session.commit()
@@ -266,7 +342,7 @@ def send_identity_email_otp(user_id):
     if not user:
         return jsonify({"error": "User not found."}), 404
     if user.identity_status == "verified":
-        return jsonify({"error": "Identity is already verified."}), 400
+        return jsonify({"error": "Account is already verified."}), 400
 
     code = generate_otp_code()
     _store_otp(user_id, "identity_email", code)
@@ -289,7 +365,7 @@ def confirm_identity_email_otp(user_id, data):
     if not user:
         return jsonify({"error": "User not found."}), 404
     if user.identity_status == "verified":
-        return jsonify({"error": "Identity is already verified."}), 400
+        return jsonify({"error": "Account is already verified."}), 400
 
     code = str(data.get("code", "")).strip()
     if not code:
@@ -314,7 +390,7 @@ def verify_identity(user_id, data):
         return jsonify({"error": "User not found."}), 404
 
     if user.identity_status == "verified" and data.get("approve") is True:
-        return jsonify({"error": "Identity is already verified."}), 400
+        return jsonify({"error": "Account is already verified."}), 400
     if user.identity_status not in ("pending", "rejected"):
         return jsonify({"error": "No legacy identity submission awaiting review."}), 400
 

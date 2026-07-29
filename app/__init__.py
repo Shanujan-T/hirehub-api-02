@@ -62,12 +62,12 @@ _DESCRIPTIONS = {
     ("PUT", "/api/users/:id"): "Update a user profile",
     ("POST", "/api/users/:id/avatar"): "Upload a user avatar image",
     ("POST", "/api/users/me/nic-document"): "Deprecated — NIC upload no longer used",
-    ("POST", "/api/users/me/identity-verification"): "Deprecated — use OTP identity endpoints",
-    ("POST", "/api/users/me/identity-verification/phone/send"): "Send SMS OTP for phone identity verification",
-    ("POST", "/api/users/me/identity-verification/phone/confirm"): "Confirm phone OTP for identity verification",
-    ("POST", "/api/users/me/identity-verification/email/send"): "Send email OTP for identity verification",
-    ("POST", "/api/users/me/identity-verification/email/confirm"): "Confirm email OTP for identity verification",
-    ("PUT", "/api/users/:id/identity-verification/review"): "Review identity verification (admin)",
+    ("POST", "/api/users/me/identity-verification"): "Submit NIC document identity verification for manual review",
+    ("POST", "/api/users/me/identity-verification/phone/send"): "Send SMS OTP for phone account verification",
+    ("POST", "/api/users/me/identity-verification/phone/confirm"): "Confirm phone OTP for account verification",
+    ("POST", "/api/users/me/identity-verification/email/send"): "Send email OTP for account verification",
+    ("POST", "/api/users/me/identity-verification/email/confirm"): "Confirm email OTP for account verification",
+    ("PUT", "/api/users/:id/identity-verification/review"): "Review legacy identity verification submission (admin)",
     ("DELETE", "/api/users/:id"): "Delete a user",
     ("GET", "/api/skills"): "List all skills",
     ("POST", "/api/skills"): "Create a new skill",
@@ -207,9 +207,24 @@ def create_app():
         return User.query.get(int(identity))
 
     @app.errorhandler(OperationalError)
+    def handle_db_connection_error(e):
+        logging.getLogger(__name__).exception("Database connection failed")
+        details = str(e) if app.config.get("DEBUG") else None
+        return jsonify({"error": "Database connection error.", "details": details}), 503
+
     @app.errorhandler(ProgrammingError)
-    def handle_db_error(e):
-        return jsonify({"error": "Database connection error.", "details": str(e)}), 503
+    def handle_db_schema_error(e):
+        logging.getLogger(__name__).exception("Database schema error (run migrations)")
+        details = str(e) if app.config.get("DEBUG") else None
+        return (
+            jsonify(
+                {
+                    "error": "Database schema is out of date. Run migrations/run_all.py on the API.",
+                    "details": details,
+                }
+            ),
+            503,
+        )
 
     with app.app_context():
         from app.models import (  # noqa: F401

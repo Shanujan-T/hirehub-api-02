@@ -38,6 +38,12 @@ class User(db.Model):
 
     location = db.Column(db.String(255), nullable=True)
 
+    address_line1 = db.Column(db.String(255), nullable=True)
+    address_line2 = db.Column(db.String(255), nullable=True)
+    address_city = db.Column(db.String(128), nullable=True)
+    address_region = db.Column(db.String(128), nullable=True)
+    address_postal_code = db.Column(db.String(32), nullable=True)
+
     avatar_url = db.Column(db.String(512), nullable=True)
 
     phone_number = db.Column(db.String(32), nullable=True)
@@ -137,8 +143,8 @@ class User(db.Model):
         return check_password_hash(self.password, password)
 
     def sync_identity_verification_status(self):
-        """Instant verification when both phone and email OTP checks are complete."""
-        if self.phone_verified_at and self.email_verified_at:
+        """Instant verification when phone or email OTP check is complete."""
+        if self.phone_verified_at or self.email_verified_at:
             self.identity_status = "verified"
             self.identity_rejection_reason = None
 
@@ -208,26 +214,37 @@ class User(db.Model):
                 data["phone_verified_at"] = self.phone_verified_at.isoformat()
             if self.email_verified_at:
                 data["email_verified_at"] = self.email_verified_at.isoformat()
+            data["address_line1"] = self.address_line1
+            data["address_line2"] = self.address_line2
+            data["address_city"] = self.address_city
+            data["address_region"] = self.address_region
+            data["address_postal_code"] = self.address_postal_code
+
+        if is_platform_admin and not is_self:
+            data["address_line1"] = self.address_line1
+            data["address_line2"] = self.address_line2
+            data["address_city"] = self.address_city
+            data["address_region"] = self.address_region
+            data["address_postal_code"] = self.address_postal_code
 
 
 
-        if is_platform_admin and self.nic_number:
+        from app.utils.nic_encryption import decrypt_nic, mask_nic
 
-            from app.utils.nic_encryption import decrypt_nic, mask_nic
-
-
-
+        show_nic_admin = is_platform_admin and self.nic_number
+        show_nic_self = (
+            is_self
+            and self.nic_number
+            and self.identity_status in ("pending", "verified")
+        )
+        if show_nic_admin or show_nic_self:
             try:
-
                 data["nic_masked"] = mask_nic(decrypt_nic(self.nic_number))
-
             except (ValueError, RuntimeError):
-
                 data["nic_masked"] = None
 
-            if self.nic_document_url:
-
-                data["nic_document_url"] = self.nic_document_url
+        if is_platform_admin and self.nic_document_url:
+            data["nic_document_url"] = self.nic_document_url
 
 
 

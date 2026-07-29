@@ -55,7 +55,7 @@ def create_community(data, user_id):
     if not user:
         return jsonify({"error": "User not found."}), 404
     if user.identity_status != "verified":
-        return jsonify({"error": "Identity verification required before creating a community."}), 403
+        return jsonify({"error": "Account verification required before creating a community."}), 403
 
     errors, name = _validate_community_payload(data, require_review_fields=True)
     if errors:
