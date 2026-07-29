@@ -7,44 +7,64 @@ from app.middleware import get_admin_community_ids, is_community_admin
 from app.models.community_member_model import CommunityMember
 from app.models.contract_application_model import ContractApplication
 from app.models.contract_model import Contract
+from app.models.job_model import Job
 from app.models.payment_model import Payment
 from app.utils import utc_now
 from app.utils.pricing_utils import recalc_category_pricing
 
 
-def get_contracts(user_id, user_role):
-    if user_role == "client":
-        from app.models.job_model import Job
-        contracts = (
-            Contract.query.join(Job).filter(Job.client_id == user_id).all()
-        )
-        return jsonify({"contracts": [c.to_dict(include_job=True, include_community=True) for c in contracts]}), 200
+def _is_job_poster(user_id, contract):
+    job = Job.query.get(contract.job_id)
+    return job is not None and job.posted_by_id == user_id
 
+
+def get_contracts(user_id, user_role):
     if user_role == "admin":
         contracts = Contract.query.all()
         return jsonify({"contracts": [c.to_dict(include_job=True, include_community=True) for c in contracts]}), 200
 
+    seen = set()
+    contracts = []
+
+    def add_batch(batch):
+        for c in batch:
+            if c.id not in seen:
+                seen.add(c.id)
+                contracts.append(c)
+
+    add_batch(Contract.query.join(Job).filter(Job.posted_by_id == user_id).all())
+
     admin_ids = get_admin_community_ids(user_id)
     if admin_ids:
-        contracts = Contract.query.filter(Contract.community_id.in_(admin_ids)).all()
-        return jsonify({"contracts": [c.to_dict(include_job=True, include_community=True) for c in contracts]}), 200
+        add_batch(Contract.query.filter(Contract.community_id.in_(admin_ids)).all())
 
-    # Member view
-    member_contracts = Contract.query.filter_by(assigned_member_id=user_id).all()
-    open_contracts = Contract.query.filter_by(status="open_internally").all()
+    add_batch(Contract.query.filter_by(assigned_member_id=user_id).all())
+
     member_community_ids = [
         m.community_id
         for m in CommunityMember.query.filter_by(user_id=user_id, status="approved").all()
     ]
-    open_for_member = [
-        c for c in open_contracts if c.community_id in member_community_ids
-    ]
-    all_contracts = {c.id: c for c in member_contracts + open_for_member}
-    return jsonify({
-        "contracts": [
-            c.to_dict(include_job=True, strip_client=True) for c in all_contracts.values()
+    if member_community_ids:
+        open_for_member = [
+            c
+            for c in Contract.query.filter_by(status="open_internally").all()
+            if c.community_id in member_community_ids
         ]
-    }), 200
+        add_batch(open_for_member)
+
+    payload = []
+    for c in contracts:
+        is_poster = _is_job_poster(user_id, c)
+        is_admin = is_community_admin(user_id, c.community_id)
+        strip_poster = not is_poster and not is_admin
+        payload.append(
+            c.to_dict(
+                include_job=True,
+                strip_poster=strip_poster,
+                include_community=is_poster or is_admin,
+            )
+        )
+    return jsonify({"contracts": payload}), 200
 
 
 def get_contract(contract_id, user_id, user_role):
@@ -52,15 +72,10 @@ def get_contract(contract_id, user_id, user_role):
     if not contract:
         return jsonify({"error": "Contract not found."}), 404
 
-    strip_client = user_role == "user" and not is_community_admin(user_id, contract.community_id)
+    is_poster = _is_job_poster(user_id, contract)
+    strip_poster = not is_poster and not is_community_admin(user_id, contract.community_id)
 
-    if user_role == "client":
-        from app.models.job_model import Job
-        job = Job.query.get(contract.job_id)
-        if not job or job.client_id != user_id:
-            return jsonify({"error": "Forbidden."}), 403
-
-    if user_role == "user":
+    if user_role != "admin" and not is_poster:
         admin_ids = get_admin_community_ids(user_id)
         member_ids = [
             m.community_id
@@ -75,7 +90,7 @@ def get_contract(contract_id, user_id, user_role):
     return jsonify({
         "contract": contract.to_dict(
             include_job=True,
-            strip_client=strip_client,
+            strip_poster=strip_poster,
             include_community=True,
         )
     }), 200
@@ -147,14 +162,14 @@ def submit_deliverable(contract_id, user_id, data):
     contract.status = "submitted"
     try:
         db.session.commit()
-        return jsonify({"message": "Deliverable submitted.", "contract": contract.to_dict(strip_client=True)}), 200
+        return jsonify({"message": "Deliverable submitted.", "contract": contract.to_dict(strip_poster=True)}), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to submit deliverable."}), 500
 
 
 def approve_deliverable_admin(contract_id, user_id):
-    """Community admin QA - marks ready for client review."""
+    """Community admin QA — forwards to job poster for final approval."""
     contract = Contract.query.get(contract_id)
     if not contract:
         return jsonify({"error": "Contract not found."}), 404
@@ -162,22 +177,23 @@ def approve_deliverable_admin(contract_id, user_id):
         return jsonify({"error": "Forbidden."}), 403
     if contract.status != "submitted":
         return jsonify({"error": "No deliverable to review."}), 400
-    # Status stays submitted until the client approves
     try:
         db.session.commit()
-        return jsonify({"message": "Deliverable forwarded to client.", "contract": contract.to_dict(include_job=True)}), 200
+        return jsonify({
+            "message": "Deliverable forwarded to job poster.",
+            "contract": contract.to_dict(include_job=True),
+        }), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to approve deliverable."}), 500
 
 
-def approve_deliverable_client(contract_id, client_id):
+def approve_deliverable_poster(contract_id, poster_user_id):
     contract = Contract.query.get(contract_id)
     if not contract:
         return jsonify({"error": "Contract not found."}), 404
-    from app.models.job_model import Job
     job = Job.query.get(contract.job_id)
-    if not job or job.client_id != client_id:
+    if not job or job.posted_by_id != poster_user_id:
         return jsonify({"error": "Forbidden."}), 403
     if contract.status != "submitted":
         return jsonify({"error": "No deliverable to approve."}), 400

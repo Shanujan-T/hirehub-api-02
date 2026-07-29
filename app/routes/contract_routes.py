@@ -55,10 +55,16 @@ def admin_approve_deliverable(contract_id):
     return contract_controller.approve_deliverable_admin(contract_id, get_jwt_identity())
 
 
+@contracts_bp.route("/<int:contract_id>/poster-approve-deliverable", methods=["POST"])
+@jwt_required()
+def poster_approve_deliverable(contract_id):
+    return contract_controller.approve_deliverable_poster(contract_id, int(get_jwt_identity()))
+
+
 @contracts_bp.route("/<int:contract_id>/client-approve-deliverable", methods=["POST"])
 @jwt_required()
-def client_approve_deliverable(contract_id):
-    return contract_controller.approve_deliverable_client(contract_id, get_jwt_identity())
+def client_approve_deliverable_legacy(contract_id):
+    return contract_controller.approve_deliverable_poster(contract_id, int(get_jwt_identity()))
 
 
 @contracts_bp.route("/<int:contract_id>/messages", methods=["GET"])
