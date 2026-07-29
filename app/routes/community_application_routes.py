@@ -11,7 +11,7 @@ community_applications_bp = Blueprint(
 @community_applications_bp.route("/my", methods=["GET"])
 @jwt_required()
 def my_applications():
-    return community_application_controller.get_my_applications(get_jwt_identity())
+    return community_application_controller.get_my_applications(int(get_jwt_identity()))
 
 
 @community_applications_bp.route("/apply", methods=["POST"])
@@ -19,14 +19,14 @@ def my_applications():
 def apply_to_job():
     data = request.get_json() or {}
     return community_application_controller.apply_to_job(
-        data.get("job_id"), data.get("community_id"), get_jwt_identity(), data
+        data.get("job_id"), data.get("community_id"), int(get_jwt_identity()), data
     )
 
 
 @community_applications_bp.route("/job/<int:job_id>", methods=["GET"])
 @jwt_required()
 def job_applications(job_id):
-    return community_application_controller.get_applications_for_job(job_id, get_jwt_identity())
+    return community_application_controller.get_applications_for_job(job_id, int(get_jwt_identity()))
 
 
 @community_applications_bp.route("/<int:application_id>/approve", methods=["POST"])
@@ -34,11 +34,11 @@ def job_applications(job_id):
 def approve_community(application_id):
     data = request.get_json() or {}
     return community_application_controller.approve_community(
-        application_id, get_jwt_identity(), data
+        application_id, int(get_jwt_identity()), data
     )
 
 
 @community_applications_bp.route("/<int:application_id>/reject", methods=["POST"])
 @jwt_required()
 def reject_community(application_id):
-    return community_application_controller.reject_community(application_id, get_jwt_identity())
+    return community_application_controller.reject_community(application_id, int(get_jwt_identity()))

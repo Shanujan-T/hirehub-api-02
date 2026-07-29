@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 from flask import jsonify
 
 from app.extensions import db
-from app.middleware import community_meets_minimum, get_admin_community_ids, is_community_admin
+from app.middleware import can_browse_job_marketplace, community_meets_minimum, get_admin_community_ids, is_community_admin
 from app.models.community_application_model import CommunityApplication
 from app.models.community_member_model import CommunityMember
 from app.models.community_model import Community
@@ -42,6 +42,17 @@ def _validate_bid(data):
 
 
 def apply_to_job(job_id, community_id, user_id, data=None):
+    if not can_browse_job_marketplace(user_id):
+        return (
+            jsonify(
+                {
+                    "error": "Job marketplace is available only to community admins "
+                    "of communities with at least 3 approved members."
+                }
+            ),
+            403,
+        )
+
     bid, error = _validate_bid(data)
     if error:
         return error
@@ -88,11 +99,11 @@ def apply_to_job(job_id, community_id, user_id, data=None):
         return jsonify({"error": "Failed to apply to job."}), 500
 
 
-def get_applications_for_job(job_id, client_id):
+def get_applications_for_job(job_id, poster_user_id):
     job = Job.query.get(job_id)
     if not job:
         return jsonify({"error": "Job not found."}), 404
-    if job.client_id != client_id:
+    if job.posted_by_id != poster_user_id:
         return jsonify({"error": "Forbidden."}), 403
 
     applications = CommunityApplication.query.filter_by(job_id=job_id).all()
@@ -121,14 +132,14 @@ def get_my_applications(user_id):
     return jsonify({"community_applications": [a.to_dict(include_job=True) for a in applications]}), 200
 
 
-def approve_community(application_id, client_id, data=None):
+def approve_community(application_id, poster_user_id, data=None):
     data = data or {}
     application = CommunityApplication.query.get(application_id)
     if not application:
         return jsonify({"error": "Community application not found."}), 404
 
     job = Job.query.get(application.job_id)
-    if not job or job.client_id != client_id:
+    if not job or job.posted_by_id != poster_user_id:
         return jsonify({"error": "Forbidden."}), 403
     if job.status != "open":
         return jsonify({"error": "Job is no longer open."}), 400
@@ -173,12 +184,12 @@ def approve_community(application_id, client_id, data=None):
         return jsonify({"error": "Failed to approve community."}), 500
 
 
-def reject_community(application_id, client_id):
+def reject_community(application_id, poster_user_id):
     application = CommunityApplication.query.get(application_id)
     if not application:
         return jsonify({"error": "Community application not found."}), 404
     job = Job.query.get(application.job_id)
-    if not job or job.client_id != client_id:
+    if not job or job.posted_by_id != poster_user_id:
         return jsonify({"error": "Forbidden."}), 403
     application.status = "rejected"
     try:
