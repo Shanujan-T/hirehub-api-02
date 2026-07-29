@@ -2,6 +2,7 @@ from flask import jsonify
 
 from app.middleware import get_admin_community_ids, is_community_admin
 from app.models.contract_model import Contract
+from app.models.job_model import Job
 from app.models.payment_model import Payment
 
 
@@ -10,25 +11,29 @@ def get_payments(user_id, user_role):
         payments = Payment.query.all()
         return jsonify({"payments": [p.to_dict() for p in payments]}), 200
 
-    if user_role == "client":
-        from app.models.job_model import Job
-        payments = (
-            Payment.query.join(Contract).join(Job).filter(Job.client_id == user_id).all()
-        )
-        return jsonify({"payments": [p.to_dict() for p in payments]}), 200
+    seen = set()
+    payments = []
 
-    # Community admin earnings (commission)
+    def add_batch(batch):
+        for p in batch:
+            if p.id not in seen:
+                seen.add(p.id)
+                payments.append(p)
+
+    add_batch(
+        Payment.query.join(Contract).join(Job).filter(Job.posted_by_id == user_id).all()
+    )
+
     admin_ids = get_admin_community_ids(user_id)
     if admin_ids:
-        payments = Payment.query.join(Contract).filter(
-            Contract.community_id.in_(admin_ids)
-        ).all()
-        return jsonify({"payments": [p.to_dict() for p in payments]}), 200
+        add_batch(
+            Payment.query.join(Contract).filter(Contract.community_id.in_(admin_ids)).all()
+        )
 
-    # Member earnings
-    payments = Payment.query.join(Contract).filter(
-        Contract.assigned_member_id == user_id
-    ).all()
+    add_batch(
+        Payment.query.join(Contract).filter(Contract.assigned_member_id == user_id).all()
+    )
+
     return jsonify({"payments": [p.to_dict() for p in payments]}), 200
 
 

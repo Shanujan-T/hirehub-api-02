@@ -29,7 +29,7 @@ def create_review(data, reviewer_id):
     if not contract:
         return jsonify({"error": "Contract not found."}), 404
     job = Job.query.get(contract.job_id)
-    if not job or job.client_id != reviewer_id:
+    if not job or job.posted_by_id != reviewer_id:
         return jsonify({"error": "Forbidden."}), 403
     if contract.status != "completed":
         return jsonify({"error": "Contract must be completed to leave a review."}), 400

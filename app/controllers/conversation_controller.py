@@ -12,7 +12,7 @@ def _get_contract(contract_id):
 
 def can_access_contract_conversation(user_id, contract):
     job = Job.query.get(contract.job_id)
-    if job and job.client_id == user_id:
+    if job and job.posted_by_id == user_id:
         return True
     return is_community_admin(user_id, contract.community_id)
 
