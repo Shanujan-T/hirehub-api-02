@@ -14,9 +14,6 @@ def _validate_auth_payload(data, is_register=False):
             errors.append("password is required.")
         if not data.get("full_name"):
             errors.append("full_name is required.")
-        role = data.get("role", "user")
-        if role not in ("user", "client"):
-            errors.append("role must be 'user' or 'client'.")
     else:
         if not data.get("email"):
             errors.append("email is required.")
@@ -36,7 +33,7 @@ def register(data):
     user = User(
         email=data["email"],
         full_name=data["full_name"],
-        role=data.get("role", "user"),
+        role="user",
     )
     user.set_password(data["password"])
     db.session.add(user)
