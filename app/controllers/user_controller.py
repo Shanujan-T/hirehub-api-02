@@ -2,7 +2,8 @@ from flask import jsonify
 
 from app.extensions import db
 from app.models.user_model import User
-from app.utils.cloudinary_client import upload_image
+from app.utils.cloudinary_client import upload_document, upload_image
+from app.utils.nic_encryption import encrypt_nic, validate_nic_format
 
 
 def _validate_user_payload(data, user_id=None):
@@ -17,9 +18,15 @@ def _validate_user_payload(data, user_id=None):
     return errors
 
 
+def _user_dict(user, viewer_id=None, viewer_role=None, **kwargs):
+    return user.to_dict(viewer_id=viewer_id, viewer_role=viewer_role, **kwargs)
+
+
 def get_users():
     users = User.query.all()
-    return jsonify({"users": [u.to_dict(include_stats=True) for u in users]}), 200
+    return jsonify({
+        "users": [_user_dict(u, viewer_role="admin", include_stats=True) for u in users]
+    }), 200
 
 
 def get_user(user_id, current_user_id=None, current_user_role=None):
@@ -33,7 +40,13 @@ def get_user(user_id, current_user_id=None, current_user_role=None):
         return jsonify({"error": "Forbidden."}), 403
 
     include_skills = is_admin and user.role == "user"
-    data = user.to_dict(include_stats=True, include_skills=include_skills)
+    data = _user_dict(
+        user,
+        viewer_id=current_user_id,
+        viewer_role=current_user_role,
+        include_stats=True,
+        include_skills=include_skills,
+    )
 
     if is_admin:
         from app.models.community_member_model import CommunityMember
@@ -89,7 +102,10 @@ def update_user(user_id, data, current_user_id, current_user_role=None):
 
     try:
         db.session.commit()
-        return jsonify({"message": "User updated.", "user": user.to_dict(include_stats=True)}), 200
+        return jsonify({
+            "message": "User updated.",
+            "user": _user_dict(user, viewer_id=current_user_id, viewer_role=current_user_role, include_stats=True),
+        }), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to update user."}), 500
@@ -117,10 +133,103 @@ def upload_avatar(user_id, current_user_id, current_user_role, file_storage):
     user.avatar_url = avatar_url
     try:
         db.session.commit()
-        return jsonify({"message": "Avatar updated.", "user": user.to_dict(include_stats=True)}), 200
+        return jsonify({
+            "message": "Avatar updated.",
+            "user": _user_dict(user, viewer_id=current_user_id, viewer_role=current_user_role, include_stats=True),
+        }), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to save avatar."}), 500
+
+
+def upload_nic_document(user_id, file_storage):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+
+    try:
+        document_url = upload_document(file_storage, "hirehub/identity")
+    except ValueError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception:
+        return jsonify({"error": "Failed to upload identity document."}), 500
+
+    return jsonify({"nic_document_url": document_url}), 200
+
+
+def submit_identity_verification(user_id, data):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+
+    nic_number = str(data.get("nic_number", "")).strip()
+    nic_document_url = str(data.get("nic_document_url", "")).strip()
+
+    errors = []
+    if not nic_number:
+        errors.append("nic_number is required.")
+    elif not validate_nic_format(nic_number):
+        errors.append("nic_number format is invalid.")
+    if not nic_document_url:
+        errors.append("nic_document_url is required.")
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    if user.identity_status == "verified":
+        return jsonify({"error": "Identity is already verified."}), 400
+
+    try:
+        user.nic_number = encrypt_nic(nic_number)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+
+    user.nic_document_url = nic_document_url
+    user.identity_status = "pending"
+    user.identity_rejection_reason = None
+
+    try:
+        db.session.commit()
+        return jsonify({
+            "message": "Identity verification submitted.",
+            "user": _user_dict(user, viewer_id=user_id, viewer_role=user.role, include_stats=True),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to submit identity verification."}), 500
+
+
+def verify_identity(user_id, data):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+
+    if user.identity_status not in ("pending", "rejected", "unverified"):
+        if user.identity_status == "verified" and data.get("approve") is True:
+            return jsonify({"error": "Identity is already verified."}), 400
+
+    approve = bool(data.get("approve"))
+    reason = data.get("reason")
+    if isinstance(reason, str):
+        reason = reason.strip() or None
+
+    if approve:
+        user.identity_status = "verified"
+        user.identity_rejection_reason = None
+    else:
+        user.identity_status = "rejected"
+        user.identity_rejection_reason = reason
+
+    try:
+        db.session.commit()
+        return jsonify({
+            "message": "Identity verification reviewed.",
+            "user": _user_dict(user, viewer_role="admin", include_stats=True),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to review identity verification."}), 500
 
 
 def delete_user(user_id, current_user_id):
