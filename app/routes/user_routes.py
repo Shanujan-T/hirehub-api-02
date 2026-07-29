@@ -57,7 +57,32 @@ def submit_identity_verification():
     return user_controller.submit_identity_verification(user_id, request.get_json() or {})
 
 
+@users_bp.route("/me/identity-verification/phone/send", methods=["POST"])
+@jwt_required()
+def send_identity_phone_otp():
+    user_id = int(get_jwt_identity())
+    return user_controller.send_identity_phone_otp(user_id, request.get_json() or {})
 
+
+@users_bp.route("/me/identity-verification/phone/confirm", methods=["POST"])
+@jwt_required()
+def confirm_identity_phone_otp():
+    user_id = int(get_jwt_identity())
+    return user_controller.confirm_identity_phone_otp(user_id, request.get_json() or {})
+
+
+@users_bp.route("/me/identity-verification/email/send", methods=["POST"])
+@jwt_required()
+def send_identity_email_otp():
+    user_id = int(get_jwt_identity())
+    return user_controller.send_identity_email_otp(user_id)
+
+
+@users_bp.route("/me/identity-verification/email/confirm", methods=["POST"])
+@jwt_required()
+def confirm_identity_email_otp():
+    user_id = int(get_jwt_identity())
+    return user_controller.confirm_identity_email_otp(user_id, request.get_json() or {})
 
 
 @users_bp.route("/<int:user_id>", methods=["GET"])

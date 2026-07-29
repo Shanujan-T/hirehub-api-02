@@ -40,6 +40,10 @@ class User(db.Model):
 
     avatar_url = db.Column(db.String(512), nullable=True)
 
+    phone_number = db.Column(db.String(32), nullable=True)
+    phone_verified_at = db.Column(db.DateTime, nullable=True)
+    email_verified_at = db.Column(db.DateTime, nullable=True)
+
     nic_number = db.Column(db.String(512), nullable=True)
 
     nic_document_url = db.Column(db.String(512), nullable=True)
@@ -132,6 +136,18 @@ class User(db.Model):
 
         return check_password_hash(self.password, password)
 
+    def sync_identity_verification_status(self):
+        """Instant verification when both phone and email OTP checks are complete."""
+        if self.phone_verified_at and self.email_verified_at:
+            self.identity_status = "verified"
+            self.identity_rejection_reason = None
+
+    def identity_email_verified(self) -> bool:
+        return self.email_verified_at is not None
+
+    def identity_phone_verified(self) -> bool:
+        return self.phone_verified_at is not None
+
 
 
     def to_dict(
@@ -183,6 +199,15 @@ class User(db.Model):
         if is_self and self.identity_status == "rejected" and self.identity_rejection_reason:
 
             data["identity_rejection_reason"] = self.identity_rejection_reason
+
+        if is_self:
+            data["phone_number"] = self.phone_number
+            data["email_verified_for_identity"] = self.identity_email_verified()
+            data["phone_verified_for_identity"] = self.identity_phone_verified()
+            if self.phone_verified_at:
+                data["phone_verified_at"] = self.phone_verified_at.isoformat()
+            if self.email_verified_at:
+                data["email_verified_at"] = self.email_verified_at.isoformat()
 
 
 

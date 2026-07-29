@@ -61,8 +61,12 @@ _DESCRIPTIONS = {
     ("GET", "/api/users/:id"): "Get a single user",
     ("PUT", "/api/users/:id"): "Update a user profile",
     ("POST", "/api/users/:id/avatar"): "Upload a user avatar image",
-    ("POST", "/api/users/me/nic-document"): "Upload a NIC identity document",
-    ("POST", "/api/users/me/identity-verification"): "Submit identity verification",
+    ("POST", "/api/users/me/nic-document"): "Deprecated — NIC upload no longer used",
+    ("POST", "/api/users/me/identity-verification"): "Deprecated — use OTP identity endpoints",
+    ("POST", "/api/users/me/identity-verification/phone/send"): "Send SMS OTP for phone identity verification",
+    ("POST", "/api/users/me/identity-verification/phone/confirm"): "Confirm phone OTP for identity verification",
+    ("POST", "/api/users/me/identity-verification/email/send"): "Send email OTP for identity verification",
+    ("POST", "/api/users/me/identity-verification/email/confirm"): "Confirm email OTP for identity verification",
     ("PUT", "/api/users/:id/identity-verification/review"): "Review identity verification (admin)",
     ("DELETE", "/api/users/:id"): "Delete a user",
     ("GET", "/api/skills"): "List all skills",
@@ -227,6 +231,7 @@ def create_app():
             skill_model,
             user_model,
             user_skill_model,
+            verification_otp_model,
         )
 
         try:
