@@ -157,7 +157,7 @@ def run_seed(session) -> None:
     for row in _load_json("jobs"):
         session.add(
             Job(
-                client_id=row["client_id"],
+                posted_by_id=row["posted_by_id"],
                 category_id=row["category_id"],
                 title=row["title"],
                 description=row["description"],

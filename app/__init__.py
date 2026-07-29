@@ -54,7 +54,7 @@ _BLUEPRINT_DEFAULT_GROUP = {
 }
 
 _DESCRIPTIONS = {
-    ("POST", "/api/auth/register"): "Register a new user (user | client)",
+    ("POST", "/api/auth/register"): "Register a new user account (role is always user)",
     ("POST", "/api/auth/login"): "Log in and receive a JWT access token",
     ("GET", "/api/auth/me"): "Get current authenticated user profile",
     ("GET", "/api/users"): "List users",
@@ -117,7 +117,8 @@ _DESCRIPTIONS = {
     ("POST", "/api/contracts/:id/select-member"): "Select a member for contract",
     ("POST", "/api/contracts/:id/submit-deliverable"): "Submit contract deliverable",
     ("POST", "/api/contracts/:id/admin-approve-deliverable"): "Admin approve submitted deliverable",
-    ("POST", "/api/contracts/:id/client-approve-deliverable"): "Client approve submitted deliverable",
+    ("POST", "/api/contracts/:id/poster-approve-deliverable"): "Job poster approve submitted deliverable",
+    ("POST", "/api/contracts/:id/client-approve-deliverable"): "Legacy alias for poster-approve-deliverable",
     ("GET", "/api/contracts/:id/messages"): "List contract conversation messages",
     ("POST", "/api/contracts/:id/messages"): "Send a contract conversation message",
     ("GET", "/api/contract-applications/my"): "List my contract applications",
