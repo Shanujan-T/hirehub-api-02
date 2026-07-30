@@ -143,7 +143,10 @@ class User(db.Model):
         return check_password_hash(self.password, password)
 
     def sync_identity_verification_status(self):
-        """OTP phone/email flags only — identity_status is set via NIC admin review."""
+        """Set identity_status when phone or email OTP is confirmed (§31)."""
+        if self.identity_phone_verified() or self.identity_email_verified():
+            self.identity_status = "verified"
+            self.identity_rejection_reason = None
 
     def identity_email_verified(self) -> bool:
         return self.email_verified_at is not None
@@ -223,25 +226,6 @@ class User(db.Model):
             data["address_city"] = self.address_city
             data["address_region"] = self.address_region
             data["address_postal_code"] = self.address_postal_code
-
-
-
-        from app.utils.nic_encryption import decrypt_nic, mask_nic
-
-        show_nic_admin = is_platform_admin and self.nic_number
-        show_nic_self = (
-            is_self
-            and self.nic_number
-            and self.identity_status in ("pending", "verified")
-        )
-        if show_nic_admin or show_nic_self:
-            try:
-                data["nic_masked"] = mask_nic(decrypt_nic(self.nic_number))
-            except (ValueError, RuntimeError):
-                data["nic_masked"] = None
-
-        if is_platform_admin and self.nic_document_url:
-            data["nic_document_url"] = self.nic_document_url
 
 
 
