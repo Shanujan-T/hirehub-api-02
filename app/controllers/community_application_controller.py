@@ -1,3 +1,5 @@
+import logging
+
 from decimal import Decimal, InvalidOperation
 
 from flask import jsonify
@@ -10,6 +12,12 @@ from app.models.community_model import Community
 from app.models.contract_model import Contract
 from app.models.conversation_model import Conversation
 from app.models.job_model import Job
+from app.utils.notification_utils import (
+    notify_job_application_approved,
+    notify_job_application_rejected,
+)
+
+logger = logging.getLogger(__name__)
 
 MIN_COMMUNITY_MEMBERS = 3
 
@@ -47,7 +55,7 @@ def apply_to_job(job_id, community_id, user_id, data=None):
             jsonify(
                 {
                     "error": "Job marketplace is available only to community admins "
-                    "of communities with at least 3 approved members."
+                    "of verified communities with at least 3 approved members."
                 }
             ),
             403,
@@ -173,15 +181,26 @@ def approve_community(application_id, poster_user_id, data=None):
 
     try:
         db.session.commit()
-        return jsonify({
-            "message": "Community approved. Contract created.",
-            "community_application": application.to_dict(),
-            "contract": contract.to_dict(include_job=True),
-            "conversation": conversation.to_dict(),
-        }), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to approve community."}), 500
+
+    try:
+        job_title = job.title
+        notify_job_application_approved(application.community_id, job_title, contract.id)
+        for other in others:
+            notify_job_application_rejected(other.community_id, job_title)
+    except Exception:
+        logger.exception(
+            "Failed to send job application notifications application_id=%s", application_id
+        )
+
+    return jsonify({
+        "message": "Community approved. Contract created.",
+        "community_application": application.to_dict(),
+        "contract": contract.to_dict(include_job=True),
+        "conversation": conversation.to_dict(),
+    }), 200
 
 
 def reject_community(application_id, poster_user_id):
@@ -194,7 +213,16 @@ def reject_community(application_id, poster_user_id):
     application.status = "rejected"
     try:
         db.session.commit()
-        return jsonify({"message": "Application rejected.", "community_application": application.to_dict()}), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to reject application."}), 500
+
+    try:
+        if job:
+            notify_job_application_rejected(application.community_id, job.title)
+    except Exception:
+        logger.exception(
+            "Failed to send job rejection notification application_id=%s", application_id
+        )
+
+    return jsonify({"message": "Application rejected.", "community_application": application.to_dict()}), 200
