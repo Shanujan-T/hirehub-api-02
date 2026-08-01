@@ -67,12 +67,16 @@ def get_contracts(user_id, user_role):
     for c in contracts:
         is_poster = _is_job_poster(user_id, c)
         is_admin = is_community_admin(user_id, c.community_id)
+        is_member = c.community_id in member_community_ids
+        is_assigned = c.assigned_member_id == user_id
         strip_poster = not is_poster and not is_admin
+        # Members need community name when browsing internal openings across multiple communities
+        include_community = is_poster or is_admin or is_member or is_assigned
         payload.append(
             c.to_dict(
                 include_job=True,
                 strip_poster=strip_poster,
-                include_community=is_poster or is_admin,
+                include_community=include_community,
             )
         )
     return jsonify({"contracts": payload}), 200
