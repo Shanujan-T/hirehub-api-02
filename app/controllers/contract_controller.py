@@ -1,4 +1,5 @@
 from decimal import Decimal
+import logging
 
 from flask import jsonify
 
@@ -10,7 +11,17 @@ from app.models.contract_model import Contract
 from app.models.job_model import Job
 from app.models.payment_model import Payment
 from app.utils import utc_now
+from app.utils.notification_utils import (
+    notify_contract_assigned,
+    notify_contract_application_rejected,
+    notify_contract_open_internally,
+    notify_deliverable_approved,
+    notify_deliverable_forwarded,
+    notify_deliverable_submitted,
+)
 from app.utils.pricing_utils import recalc_category_pricing
+
+logger = logging.getLogger(__name__)
 
 
 def _is_job_poster(user_id, contract):
@@ -105,8 +116,11 @@ def open_contract_internally(contract_id, user_id):
     if contract.status != "pending_assignment":
         return jsonify({"error": "Contract cannot be opened internally."}), 400
     contract.status = "open_internally"
+    job = Job.query.get(contract.job_id)
     try:
         db.session.commit()
+        if job:
+            notify_contract_open_internally(contract.community_id, job.title, contract.id)
         return jsonify({"message": "Contract opened internally.", "contract": contract.to_dict()}), 200
     except Exception:
         db.session.rollback()
@@ -139,6 +153,11 @@ def select_member(contract_id, application_id, user_id):
 
     try:
         db.session.commit()
+        job = Job.query.get(contract.job_id)
+        job_title = job.title if job else "the contract"
+        notify_contract_assigned(application.member_id, job_title, contract.id)
+        for other in others:
+            notify_contract_application_rejected(other.member_id, job_title, contract.id)
         return jsonify({"message": "Member selected.", "contract": contract.to_dict(include_job=True)}), 200
     except Exception:
         db.session.rollback()
@@ -160,8 +179,11 @@ def submit_deliverable(contract_id, user_id, data):
 
     contract.deliverable_url = deliverable_url
     contract.status = "submitted"
+    job = Job.query.get(contract.job_id)
     try:
         db.session.commit()
+        if job:
+            notify_deliverable_submitted(contract.community_id, job.title, contract.id)
         return jsonify({"message": "Deliverable submitted.", "contract": contract.to_dict(strip_poster=True)}), 200
     except Exception:
         db.session.rollback()
@@ -177,8 +199,11 @@ def approve_deliverable_admin(contract_id, user_id):
         return jsonify({"error": "Forbidden."}), 403
     if contract.status != "submitted":
         return jsonify({"error": "No deliverable to review."}), 400
+    job = Job.query.get(contract.job_id)
     try:
         db.session.commit()
+        if job:
+            notify_deliverable_forwarded(job.posted_by_id, job.title, contract.id)
         return jsonify({
             "message": "Deliverable forwarded to job poster.",
             "contract": contract.to_dict(include_job=True),
@@ -220,6 +245,13 @@ def approve_deliverable_poster(contract_id, poster_user_id):
     try:
         db.session.commit()
         recalc_category_pricing(job.category_id, job.location)
+        try:
+            if contract.assigned_member_id:
+                notify_deliverable_approved(contract.assigned_member_id, job.title, contract.id)
+        except Exception:
+            logger.exception(
+                "Failed to notify member of deliverable approval contract_id=%s", contract_id
+            )
         return jsonify({
             "message": "Deliverable approved. Payment released.",
             "contract": contract.to_dict(include_job=True),
