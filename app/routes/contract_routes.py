@@ -70,12 +70,12 @@ def client_approve_deliverable_legacy(contract_id):
 @contracts_bp.route("/<int:contract_id>/messages", methods=["GET"])
 @jwt_required()
 def list_contract_messages(contract_id):
-    return message_controller.list_messages(contract_id, get_jwt_identity())
+    return message_controller.list_messages(contract_id, int(get_jwt_identity()))
 
 
 @contracts_bp.route("/<int:contract_id>/messages", methods=["POST"])
 @jwt_required()
 def send_contract_message(contract_id):
     return message_controller.send_message(
-        contract_id, get_jwt_identity(), request.get_json() or {}
+        contract_id, int(get_jwt_identity()), request.get_json() or {}
     )
