@@ -1,13 +1,20 @@
+import logging
+
 from flask import jsonify
 
 from app.extensions import db
 from app.middleware import is_community_admin
 from app.models.community_member_model import CommunityMember
 from app.models.community_model import Community
+from app.models.user_model import User
 from app.utils import utc_now
+from app.utils.notification_utils import notify_community_join_request, notify_membership_decision
+
+logger = logging.getLogger(__name__)
 
 
 def request_join(community_id, user_id):
+    user_id = int(user_id)
     community = Community.query.get(community_id)
     if not community or community.status != "approved":
         return jsonify({"error": "Community is not available for join requests."}), 400
@@ -26,6 +33,65 @@ def request_join(community_id, user_id):
     db.session.add(membership)
     try:
         db.session.commit()
+        logger.info(
+            "Join request created membership_id=%s community_id=%s user_id=%s status=%s role=%s",
+            membership.id,
+            membership.community_id,
+            membership.user_id,
+            membership.status,
+            membership.role,
+        )
+        admin_row = CommunityMember.query.filter_by(
+            community_id=community_id, role="admin"
+        ).first()
+        logger.info(
+            "Pre-notify admin lookup community_id=%s first_admin_row=%s",
+            community_id,
+            {
+                "membership_id": admin_row.id,
+                "user_id": admin_row.user_id,
+                "role": admin_row.role,
+                "status": admin_row.status,
+            }
+            if admin_row
+            else None,
+        )
+        if not admin_row:
+            logger.warning("NO ADMIN FOUND for community_id=%s", community_id)
+        try:
+            requesting_user = User.query.get(user_id)
+            if requesting_user and community:
+                logger.info(
+                    "Calling notify_community_join_request community_id=%s membership_id=%s requester_user_id=%s admin_target=%s",
+                    community_id,
+                    membership.id,
+                    user_id,
+                    admin_row.user_id if admin_row else None,
+                )
+                notify_community_join_request(
+                    community_id=community_id,
+                    membership_id=membership.id,
+                    requester_name=requesting_user.full_name,
+                    community_name=community.name,
+                    requester_user_id=user_id,
+                )
+                logger.info(
+                    "notify_community_join_request completed community_id=%s membership_id=%s",
+                    community_id,
+                    membership.id,
+                )
+            else:
+                logger.warning(
+                    "Skipped join notification — missing user or community community_id=%s user_id=%s",
+                    community_id,
+                    user_id,
+                )
+        except Exception:
+            logger.exception(
+                "Failed to notify admins of join request community_id=%s membership_id=%s",
+                community_id,
+                membership.id,
+            )
         return jsonify({"message": "Join request submitted.", "community_member": membership.to_dict()}), 201
     except Exception:
         db.session.rollback()
@@ -72,6 +138,18 @@ def approve_member(membership_id, admin_user_id, action):
         return jsonify({"error": "Invalid action."}), 400
     try:
         db.session.commit()
+        try:
+            community_name = membership.community.name if membership.community else "the community"
+            notify_membership_decision(
+                membership.user_id,
+                community_name,
+                approved=(action == "approve"),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to notify member of join decision membership_id=%s",
+                membership_id,
+            )
         return jsonify({"message": f"Member {action}d.", "community_member": membership.to_dict(include_user=True)}), 200
     except Exception:
         db.session.rollback()
