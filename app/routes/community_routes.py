@@ -4,7 +4,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required, verify_jwt_in_req
 
 
 
-from app.controllers import community_controller
+from app.controllers import ai_features_controller, community_controller
 
 from app.middleware import roles_required
 
@@ -88,6 +88,25 @@ def update_community(community_id):
 
 
 
+
+
+@communities_bp.route("/<int:community_id>/recommended-jobs", methods=["GET"])
+@jwt_required()
+def recommended_jobs(community_id):
+    return ai_features_controller.recommended_jobs_for_community(
+        community_id, int(get_jwt_identity())
+    )
+
+
+@communities_bp.route(
+    "/<int:community_id>/join-requests/<int:user_id>/fit-analysis",
+    methods=["POST"],
+)
+@jwt_required()
+def join_request_fit_analysis(community_id, user_id):
+    return ai_features_controller.join_request_fit_analysis(
+        community_id, user_id, int(get_jwt_identity())
+    )
 
 
 @communities_bp.route("/<int:community_id>/verify", methods=["PATCH"])
