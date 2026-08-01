@@ -28,6 +28,7 @@ _GROUP_ORDER = [
     "payments",
     "reviews",
     "reports",
+    "notifications",
 ]
 
 _METHOD_ORDER = {"GET": 0, "POST": 1, "PUT": 2, "PATCH": 3, "DELETE": 4}
@@ -83,7 +84,8 @@ _DESCRIPTIONS = {
     ("POST", "/api/communities"): "Create a community",
     ("GET", "/api/communities/:id"): "Get a single community",
     ("PUT", "/api/communities/:id"): "Update a community",
-    ("PUT", "/api/communities/:id/review"): "Review a community submission (admin)",
+    ("PATCH", "/api/communities/:id/verify"): "Verify or reject a community submission (admin)",
+    ("PUT", "/api/communities/:id/review"): "Review a community submission (admin, legacy)",
     ("POST", "/api/communities/:id/image"): "Upload a community image",
     ("DELETE", "/api/communities/:id"): "Delete a community",
     ("GET", "/api/community-members/my"): "List my community memberships",
@@ -132,6 +134,12 @@ _DESCRIPTIONS = {
     ("GET", "/api/payments"): "List payments for current user",
     ("GET", "/api/reviews"): "List reviews",
     ("POST", "/api/reviews"): "Create a contract review",
+    ("DELETE", "/api/messages/:id/delete-for-me"): "Delete a message for the current user only",
+    ("DELETE", "/api/messages/:id/delete-for-everyone"): "Delete a message for all participants",
+    ("GET", "/api/notifications"): "List notifications for current user",
+    ("GET", "/api/notifications/unread-count"): "Unread notification count",
+    ("PATCH", "/api/notifications/:id/read"): "Mark one notification read",
+    ("PATCH", "/api/notifications/read-all"): "Mark all notifications read",
     ("GET", "/api/reports"): "List moderation reports",
     ("POST", "/api/reports"): "Submit a moderation report",
     ("PUT", "/api/reports/:id"): "Update a report status",
@@ -238,6 +246,7 @@ def create_app():
             conversation_model,
             job_model,
             message_model,
+            notification_model,
             open_call_model,
             open_call_skill_model,
             payment_model,
