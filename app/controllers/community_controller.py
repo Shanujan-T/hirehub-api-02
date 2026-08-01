@@ -8,6 +8,7 @@ from app.models.community_model import Community
 from app.models.user_model import User
 from app.utils import utc_now
 from app.utils.cloudinary_client import upload_image
+from app.utils.notification_utils import notify_community_verification
 
 VALID_EXPERIENCE_LEVELS = {"less_than_1_year", "1_to_3_years", "3_plus_years"}
 
@@ -199,33 +200,57 @@ def update_community(community_id, data, user_id):
         return jsonify({"error": "Failed to update community."}), 500
 
 
-def review_community(community_id, data):
+def _apply_verification_status(community, verification_status, reason=None):
+    if verification_status == "verified":
+        community.status = "approved"
+        community.rejection_reason = None
+    elif verification_status == "rejected":
+        community.status = "rejected"
+        community.rejection_reason = reason
+    else:
+        return jsonify({"errors": ["verification_status must be 'verified' or 'rejected'."]}), 400
+    return None
+
+
+def verify_community(community_id, data):
     community = Community.query.get(community_id)
     if not community:
         return jsonify({"error": "Community not found."}), 404
 
-    approve = bool(data.get("approve"))
+    verification_status = data.get("verification_status")
+    if verification_status is None and "approve" in data:
+        verification_status = "verified" if bool(data.get("approve")) else "rejected"
+    if verification_status not in ("verified", "rejected"):
+        return jsonify({"errors": ["verification_status must be 'verified' or 'rejected'."]}), 400
+
     reason = data.get("reason")
     if isinstance(reason, str):
         reason = reason.strip() or None
 
-    if approve:
-        community.status = "approved"
-        community.rejection_reason = None
-    else:
-        community.status = "rejected"
-        community.rejection_reason = reason
+    error = _apply_verification_status(community, verification_status, reason)
+    if error:
+        return error
 
     try:
         db.session.commit()
+        notify_community_verification(
+            community_id,
+            community.name,
+            verified=(verification_status == "verified"),
+            reason=reason,
+        )
         payload = _community_dict(community, include_member_count=True, include_category=True)
         admin_user = _community_admin_user(community_id)
         if admin_user:
             payload["admin_user"] = admin_user.to_dict(viewer_role="admin", include_stats=True)
-        return jsonify({"message": "Community reviewed.", "community": payload}), 200
+        return jsonify({"message": "Community verification updated.", "community": payload}), 200
     except Exception:
         db.session.rollback()
-        return jsonify({"error": "Failed to review community."}), 500
+        return jsonify({"error": "Failed to verify community."}), 500
+
+
+def review_community(community_id, data):
+    return verify_community(community_id, data)
 
 
 def delete_community(community_id, user_id):
