@@ -1,10 +1,13 @@
 import os
 from datetime import timedelta
+from pathlib import Path
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# Always load hirehub-api-02/.env regardless of process cwd (IDE, workspace root, etc.)
+_API_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_API_ROOT / ".env")
 
 
 def _normalize_mysql_url(url: str) -> str:
