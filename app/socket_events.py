@@ -8,6 +8,7 @@ from app.controllers.conversation_controller import can_access_contract_conversa
 from app.extensions import socketio
 from app.models.conversation_model import Conversation
 from app.models.user_model import User
+from app.utils.notification_utils import user_room
 
 _connected_users = {}
 
@@ -38,11 +39,14 @@ def handle_connect(auth):
     if not user:
         return False
     _connected_users[request.sid] = user.id
+    join_room(user_room(user.id))
 
 
 @socketio.on("disconnect")
 def handle_disconnect():
-    _connected_users.pop(request.sid, None)
+    user_id = _connected_users.pop(request.sid, None)
+    if user_id:
+        leave_room(user_room(user_id))
 
 
 @socketio.on("join_conversation")
