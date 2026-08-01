@@ -27,6 +27,7 @@ MIGRATION_MODULES = [
     "migrations.008_account_verify_phone_or_email",
     "migrations.009_notifications",
     "migrations.010_message_deletion",
+    "migrations.011_ai_match_blurbs",
 ]
 
 
