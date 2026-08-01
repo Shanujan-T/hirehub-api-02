@@ -4,6 +4,7 @@ from flask import jsonify
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 
 from app.models.community_member_model import CommunityMember
+from app.models.community_model import Community
 from app.models.user_model import User
 
 
@@ -98,7 +99,7 @@ def get_admin_community_ids(user_id):
 
 
 def can_browse_job_marketplace(user_id):
-    """True if user admins at least one community with the minimum member count."""
+    """True if user admins at least one verified community with the minimum member count."""
     for community_id in get_admin_community_ids(user_id):
         if community_meets_minimum(community_id):
             return True
@@ -109,7 +110,10 @@ MIN_COMMUNITY_MEMBERS = 3
 
 
 def community_meets_minimum(community_id):
-    """Return True if community has at least MIN_COMMUNITY_MEMBERS approved members."""
+    """Return True if community is verified and has at least MIN_COMMUNITY_MEMBERS approved members."""
+    community = Community.query.get(community_id)
+    if not community or community.status != "approved":
+        return False
     count = CommunityMember.query.filter_by(
         community_id=community_id, status="approved"
     ).count()
