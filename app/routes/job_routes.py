@@ -1,7 +1,7 @@
 from flask import Blueprint, request
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required
 
-from app.controllers import job_controller
+from app.controllers import ai_features_controller, job_controller
 
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/api/jobs")
 
@@ -16,6 +16,14 @@ def list_jobs():
 @jwt_required()
 def create_job():
     return job_controller.create_job()
+
+
+@jobs_bp.route("/generate-description", methods=["POST"])
+@jwt_required()
+def generate_job_description():
+    return ai_features_controller.generate_job_description(
+        int(get_jwt_identity()), request.get_json() or {}
+    )
 
 
 @jobs_bp.route("/<int:job_id>", methods=["GET"])
@@ -40,3 +48,19 @@ def delete_job(job_id):
 @jwt_required()
 def job_applications(job_id):
     return job_controller.get_job_applications(job_id)
+
+
+@jobs_bp.route("/<int:job_id>/recommended-communities", methods=["GET"])
+@jwt_required()
+def recommended_communities(job_id):
+    return ai_features_controller.recommended_communities_for_job(
+        job_id, int(get_jwt_identity())
+    )
+
+
+@jobs_bp.route("/<int:job_id>/suggest-bid", methods=["POST"])
+@jwt_required()
+def suggest_bid(job_id):
+    return ai_features_controller.suggest_bid(
+        job_id, int(get_jwt_identity()), request.get_json() or {}
+    )
