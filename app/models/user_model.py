@@ -219,6 +219,9 @@ class User(db.Model):
             data["address_city"] = self.address_city
             data["address_region"] = self.address_region
             data["address_postal_code"] = self.address_postal_code
+            data["community_memberships"] = [
+                m.to_dict() for m in self.community_memberships
+            ]
 
         if is_platform_admin and not is_self:
             data["address_line1"] = self.address_line1
