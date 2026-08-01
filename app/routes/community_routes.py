@@ -90,6 +90,18 @@ def update_community(community_id):
 
 
 
+@communities_bp.route("/<int:community_id>/verify", methods=["PATCH"])
+
+@roles_required("admin")
+
+def verify_community(community_id):
+
+    return community_controller.verify_community(community_id, request.get_json() or {})
+
+
+
+
+
 @communities_bp.route("/<int:community_id>/review", methods=["PUT"])
 
 @roles_required("admin")
