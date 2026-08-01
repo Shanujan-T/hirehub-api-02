@@ -214,15 +214,17 @@ def create_app():
         identity = jwt_data["sub"]
         return User.query.get(int(identity))
 
-    @app.errorhandler(OperationalError)
-    def handle_db_connection_error(e):
-        logging.getLogger(__name__).exception("Database connection failed")
-        details = str(e) if app.config.get("DEBUG") else None
-        return jsonify({"error": "Database connection error.", "details": details}), 503
+    def _is_schema_operational_error(exc):
+        """PyMySQL reports unknown-column / missing-table as OperationalError (not ProgrammingError)."""
+        orig = getattr(exc, "orig", None)
+        errno = getattr(orig, "args", [None])[0] if orig is not None else None
+        # 1054 unknown column, 1146 table doesn't exist, 1051 unknown table
+        return errno in (1051, 1054, 1146)
 
-    @app.errorhandler(ProgrammingError)
-    def handle_db_schema_error(e):
-        logging.getLogger(__name__).exception("Database schema error (run migrations)")
+    def _schema_error_response(e):
+        logging.getLogger(__name__).exception(
+            "Database schema error type=%s message=%s", type(e).__name__, e
+        )
         details = str(e) if app.config.get("DEBUG") else None
         return (
             jsonify(
@@ -233,6 +235,20 @@ def create_app():
             ),
             503,
         )
+
+    @app.errorhandler(OperationalError)
+    def handle_db_connection_error(e):
+        if _is_schema_operational_error(e):
+            return _schema_error_response(e)
+        logging.getLogger(__name__).exception(
+            "Database connection error type=%s message=%s", type(e).__name__, e
+        )
+        details = str(e) if app.config.get("DEBUG") else None
+        return jsonify({"error": "Database connection error.", "details": details}), 503
+
+    @app.errorhandler(ProgrammingError)
+    def handle_db_schema_error(e):
+        return _schema_error_response(e)
 
     with app.app_context():
         from app.models import (  # noqa: F401
