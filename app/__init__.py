@@ -112,6 +112,12 @@ _DESCRIPTIONS = {
     ("GET", "/api/jobs/:id"): "Get a single job",
     ("PUT", "/api/jobs/:id"): "Update a job posting",
     ("DELETE", "/api/jobs/:id"): "Delete a job posting",
+    ("GET", "/api/jobs/:id/applications"): "List applications for a job",
+    ("GET", "/api/jobs/:id/recommended-communities"): "Ranked community matches for a job (poster)",
+    ("POST", "/api/jobs/:id/suggest-bid"): "AI bid suggestion for a community admin",
+    ("POST", "/api/jobs/generate-description"): "AI job title/description/category generator",
+    ("GET", "/api/communities/:id/recommended-jobs"): "Ranked job matches for a community (admin)",
+    ("POST", "/api/communities/:id/join-requests/:id/fit-analysis"): "AI skill-fit analysis for a pending join request",
     ("GET", "/api/community-applications/my"): "List my community job applications",
     ("POST", "/api/community-applications/apply"): "Apply community to a job",
     ("GET", "/api/community-applications/job/:id"): "List applications for a job",
@@ -125,6 +131,7 @@ _DESCRIPTIONS = {
     ("POST", "/api/contracts/:id/admin-approve-deliverable"): "Admin approve submitted deliverable",
     ("POST", "/api/contracts/:id/poster-approve-deliverable"): "Job poster approve submitted deliverable",
     ("POST", "/api/contracts/:id/client-approve-deliverable"): "Legacy alias for poster-approve-deliverable",
+    ("POST", "/api/contracts/:id/ai-review-deliverable"): "AI assistive pre-check for a submitted deliverable",
     ("GET", "/api/contracts/:id/messages"): "List contract conversation messages",
     ("POST", "/api/contracts/:id/messages"): "Send a contract conversation message",
     ("GET", "/api/contract-applications/my"): "List my contract applications",
@@ -252,6 +259,7 @@ def create_app():
 
     with app.app_context():
         from app.models import (  # noqa: F401
+            ai_match_blurb_model,
             category_model,
             category_pricing_model,
             community_application_model,
