@@ -1,7 +1,7 @@
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
-from app.controllers import contract_controller, message_controller
+from app.controllers import ai_features_controller, contract_controller, message_controller
 from app.models.user_model import User
 
 contracts_bp = Blueprint("contracts", __name__, url_prefix="/api/contracts")
@@ -53,6 +53,14 @@ def submit_deliverable(contract_id):
 @jwt_required()
 def admin_approve_deliverable(contract_id):
     return contract_controller.approve_deliverable_admin(contract_id, get_jwt_identity())
+
+
+@contracts_bp.route("/<int:contract_id>/ai-review-deliverable", methods=["POST"])
+@jwt_required()
+def ai_review_deliverable(contract_id):
+    return ai_features_controller.ai_review_deliverable(
+        contract_id, int(get_jwt_identity())
+    )
 
 
 @contracts_bp.route("/<int:contract_id>/poster-approve-deliverable", methods=["POST"])
