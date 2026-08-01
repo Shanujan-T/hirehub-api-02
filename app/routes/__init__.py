@@ -6,6 +6,8 @@ from app.routes.community_routes import communities_bp
 from app.routes.contract_application_routes import contract_applications_bp
 from app.routes.contract_routes import contracts_bp
 from app.routes.job_routes import jobs_bp
+from app.routes.message_routes import messages_bp
+from app.routes.notification_routes import notifications_bp
 from app.routes.open_call_routes import open_calls_bp
 from app.routes.payment_routes import payments_bp
 from app.routes.report_routes import reports_bp
@@ -26,6 +28,8 @@ def register_blueprints(app):
     app.register_blueprint(open_calls_bp)
     app.register_blueprint(categories_bp)
     app.register_blueprint(jobs_bp)
+    app.register_blueprint(notifications_bp)
+    app.register_blueprint(messages_bp)
     app.register_blueprint(community_applications_bp)
     app.register_blueprint(contracts_bp)
     app.register_blueprint(contract_applications_bp)
