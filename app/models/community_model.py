@@ -118,11 +118,6 @@ class Community(db.Model):
 
             "status": self.status,
 
-            # Alias for UI copy that speaks in verification terms (pending / verified / rejected)
-            "verification_status": (
-                "verified" if self.status == "approved" else self.status
-            ),
-
             "rejection_reason": self.rejection_reason,
 
             "reputation_score": self.reputation_score,
