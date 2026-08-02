@@ -182,12 +182,42 @@ def update_community(community_id, data, user_id):
         return jsonify({"error": "Community admin access required."}), 403
     if "category_id" in data:
         return jsonify({"error": "category_id cannot be changed."}), 400
+
+    errors = []
+    name = community.name
     if "name" in data:
-        community.name = data["name"]
-    if "description" in data:
-        community.description = data["description"]
+        name = str(data.get("name") or "").strip()
+        if not name:
+            errors.append("name is required.")
+
+    location = community.location
     if "location" in data:
-        community.location = data["location"]
+        location = str(data.get("location") or "").strip()
+        if not location:
+            errors.append("location is required.")
+
+    description = community.description
+    if "description" in data:
+        raw = data.get("description")
+        description = str(raw).strip() if isinstance(raw, str) else None
+        if description == "":
+            description = None
+
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    if name != community.name:
+        conflict = Community.query.filter(
+            Community.name == name, Community.id != community_id
+        ).first()
+        if conflict:
+            return jsonify({"errors": ["Community name already exists."]}), 400
+
+    community.name = name
+    community.location = location
+    if "description" in data:
+        community.description = description
+
     try:
         db.session.commit()
         return jsonify({
@@ -196,6 +226,11 @@ def update_community(community_id, data, user_id):
         }), 200
     except Exception:
         db.session.rollback()
+        conflict = Community.query.filter(
+            Community.name == name, Community.id != community_id
+        ).first()
+        if conflict:
+            return jsonify({"errors": ["Community name already exists."]}), 400
         return jsonify({"error": "Failed to update community."}), 500
 
 
@@ -256,8 +291,9 @@ def delete_community(community_id, user_id):
     community = Community.query.get(community_id)
     if not community:
         return jsonify({"error": "Community not found."}), 404
-    if not is_community_admin(user_id, community_id):
-        return jsonify({"error": "Community admin access required."}), 403
+    admin_ids = get_admin_community_ids(user_id)
+    if community_id not in admin_ids:
+        return jsonify({"error": "Forbidden."}), 403
     try:
         db.session.delete(community)
         db.session.commit()
