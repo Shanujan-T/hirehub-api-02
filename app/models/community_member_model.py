@@ -34,6 +34,16 @@ class CommunityMember(db.Model):
             "status": self.status,
             "joined_at": self.joined_at.isoformat() if self.joined_at else None,
         }
+        if self.community:
+            data["community"] = {
+                "id": self.community.id,
+                "name": self.community.name,
+                "status": self.community.status,
+                "rejection_reason": self.community.rejection_reason,
+                "experience_level": self.community.experience_level,
+                "location": self.community.location,
+                "image_url": self.community.image_url,
+            }
         if include_user and self.user:
             data["user"] = self.user.to_dict(
                 include_stats=True,
