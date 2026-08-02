@@ -98,54 +98,12 @@ def get_admin_community_ids(user_id):
     return [m.community_id for m in memberships]
 
 
-def marketplace_access_block_reason(user_id):
-    """Return a human-readable reason the marketplace is blocked, or None if allowed."""
-    admin_ids = get_admin_community_ids(user_id)
-    if not admin_ids:
-        return (
-            "Job marketplace is available only to community admins.",
-            "not_admin",
-        )
-
-    has_unverified = False
-    has_under_minimum = False
-    for community_id in admin_ids:
-        community = Community.query.get(community_id)
-        if not community:
-            continue
-        if community.status != "approved":
-            has_unverified = True
-            continue
-        count = CommunityMember.query.filter_by(
-            community_id=community_id, status="approved"
-        ).count()
-        if count < MIN_COMMUNITY_MEMBERS:
-            has_under_minimum = True
-            continue
-        return None
-
-    if has_under_minimum:
-        return (
-            f"Your community needs at least {MIN_COMMUNITY_MEMBERS} approved members "
-            "to browse jobs.",
-            "insufficient_members",
-        )
-    if has_unverified:
-        return (
-            "Your community isn't verified yet. A platform admin must approve it "
-            "before you can browse or apply to jobs.",
-            "community_not_verified",
-        )
-    return (
-        "Job marketplace is available only to community admins "
-        f"of verified communities with at least {MIN_COMMUNITY_MEMBERS} members.",
-        "ineligible",
-    )
-
-
 def can_browse_job_marketplace(user_id):
     """True if user admins at least one verified community with the minimum member count."""
-    return marketplace_access_block_reason(user_id) is None
+    for community_id in get_admin_community_ids(user_id):
+        if community_meets_minimum(community_id):
+            return True
+    return False
 
 
 MIN_COMMUNITY_MEMBERS = 3
