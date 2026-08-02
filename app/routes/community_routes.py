@@ -6,7 +6,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required, verify_jwt_in_req
 
 from app.controllers import ai_features_controller, community_controller
 
-from app.middleware import roles_required
+from app.middleware import community_admin_required, roles_required
 
 from app.models.user_model import User
 
@@ -78,9 +78,11 @@ def get_community(community_id):
 
 
 
-@communities_bp.route("/<int:community_id>", methods=["PUT"])
+@communities_bp.route("/<int:community_id>", methods=["PUT", "PATCH"])
 
 @jwt_required()
+
+@community_admin_required()
 
 def update_community(community_id):
 
