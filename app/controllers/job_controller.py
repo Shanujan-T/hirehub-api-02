@@ -4,7 +4,7 @@ from flask import jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
 from app.extensions import db
-from app.middleware import can_browse_job_marketplace, marketplace_access_block_reason
+from app.middleware import can_browse_job_marketplace
 from app.models.category_model import Category
 from app.models.community_application_model import CommunityApplication
 from app.models.contract_model import Contract
@@ -53,11 +53,14 @@ def get_jobs():
     marketplace = request.args.get("marketplace", "").lower() in ("1", "true", "yes")
 
     if marketplace:
-        blocked = marketplace_access_block_reason(user_id)
-        if blocked:
-            message, code = blocked
+        if not can_browse_job_marketplace(user_id):
             return (
-                jsonify({"error": message, "code": code}),
+                jsonify(
+                    {
+                        "error": "Job marketplace is available only to community admins "
+                        "of communities with at least 3 approved members."
+                    }
+                ),
                 403,
             )
         query = Job.query.filter_by(status="open")
