@@ -139,6 +139,8 @@ def review_community(community_id):
 
 @jwt_required()
 
+@community_admin_required()
+
 def upload_community_image(community_id):
 
     file_storage = request.files.get("image")
