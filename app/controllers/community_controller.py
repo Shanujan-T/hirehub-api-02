@@ -178,9 +178,8 @@ def update_community(community_id, data, user_id):
     community = Community.query.get(community_id)
     if not community:
         return jsonify({"error": "Community not found."}), 404
-    admin_ids = get_admin_community_ids(user_id)
-    if community_id not in admin_ids:
-        return jsonify({"error": "Forbidden."}), 403
+    if not is_community_admin(user_id, community_id):
+        return jsonify({"error": "Community admin access required."}), 403
     if "category_id" in data:
         return jsonify({"error": "category_id cannot be changed."}), 400
     if "name" in data:
@@ -257,9 +256,8 @@ def delete_community(community_id, user_id):
     community = Community.query.get(community_id)
     if not community:
         return jsonify({"error": "Community not found."}), 404
-    admin_ids = get_admin_community_ids(user_id)
-    if community_id not in admin_ids:
-        return jsonify({"error": "Forbidden."}), 403
+    if not is_community_admin(user_id, community_id):
+        return jsonify({"error": "Community admin access required."}), 403
     try:
         db.session.delete(community)
         db.session.commit()
@@ -274,9 +272,8 @@ def upload_community_image(community_id, user_id, file_storage):
     if not community:
         return jsonify({"error": "Community not found."}), 404
 
-    admin_ids = get_admin_community_ids(user_id)
-    if community_id not in admin_ids:
-        return jsonify({"error": "Forbidden."}), 403
+    if not is_community_admin(user_id, community_id):
+        return jsonify({"error": "Community admin access required."}), 403
 
     try:
         image_url = upload_image(file_storage, "hirehub/communities")
