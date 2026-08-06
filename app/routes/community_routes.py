@@ -100,6 +100,11 @@ def recommended_jobs(community_id):
     )
 
 
+@communities_bp.route("/<int:community_id>/review-digest", methods=["GET"])
+def community_review_digest(community_id):
+    return ai_features_controller.get_community_review_digest(community_id)
+
+
 @communities_bp.route(
     "/<int:community_id>/join-requests/<int:user_id>/fit-analysis",
     methods=["POST"],
