@@ -22,7 +22,7 @@ from app.utils import utc_now
 
 SCOPE_SCHEMAS: dict[str, list[dict]] = {
     "Web Development": [
-        {"key": "pages", "label": "Number of pages", "type": "number"},
+        {"key": "pages", "label": "Number of pages", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "features",
             "label": "Features needed",
@@ -38,10 +38,17 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Landscaping": [
-        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
+        {
+            "key": "area_sqft",
+            "label": "Area (sq ft)",
+            "type": "number",
+            "unit": "sq ft",
+            "affects_price": True,
+            "unit_size": 1,
+        },
     ],
     "Plumbing": [
-        {"key": "fixtures_count", "label": "Number of fixtures", "type": "number"},
+        {"key": "fixtures_count", "label": "Number of fixtures", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "job_type",
             "label": "Job type",
@@ -50,7 +57,7 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Electrical": [
-        {"key": "rooms_count", "label": "Number of rooms", "type": "number"},
+        {"key": "rooms_count", "label": "Number of rooms", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "job_type",
             "label": "Job type",
@@ -72,10 +79,17 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
                 "Print Ads",
             ],
         },
-        {"key": "revisions", "label": "Number of revision rounds", "type": "number"},
+        {"key": "revisions", "label": "Number of revision rounds", "type": "number", "affects_price": False, "unit_size": 1},
     ],
     "Carpentry": [
-        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
+        {
+            "key": "area_sqft",
+            "label": "Area (sq ft)",
+            "type": "number",
+            "unit": "sq ft",
+            "affects_price": False,
+            "unit_size": 1,
+        },
         {
             "key": "material",
             "label": "Material",
@@ -84,7 +98,13 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Photography": [
-        {"key": "hours", "label": "Estimated hours", "type": "number"},
+        {
+            "key": "hours",
+            "label": "Estimated hours",
+            "type": "number",
+            "affects_price": True,
+            "unit_size": 1,
+        },
         {
             "key": "package",
             "label": "Package",
@@ -93,20 +113,35 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Content Writing": [
-        {"key": "word_count", "label": "Word count", "type": "number"},
+        {
+            "key": "word_count",
+            "label": "Word count",
+            "type": "number",
+            "affects_price": True,
+            "unit_size": 100,
+            "required": True,
+        },
         {
             "key": "content_type",
             "label": "Content type",
             "type": "select",
             "options": ["Blog Post", "Website Copy", "Technical Docs"],
+            "affects_price": False,
         },
     ],
     "Painting": [
-        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
-        {"key": "coats", "label": "Number of coats", "type": "number"},
+        {
+            "key": "area_sqft",
+            "label": "Area (sq ft)",
+            "type": "number",
+            "unit": "sq ft",
+            "affects_price": True,
+            "unit_size": 1,
+        },
+        {"key": "coats", "label": "Number of coats", "type": "number", "affects_price": False, "unit_size": 1},
     ],
     "HVAC": [
-        {"key": "units_count", "label": "Number of units", "type": "number"},
+        {"key": "units_count", "label": "Number of units", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "job_type",
             "label": "Job type",
@@ -115,7 +150,14 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Roofing": [
-        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
+        {
+            "key": "area_sqft",
+            "label": "Area (sq ft)",
+            "type": "number",
+            "unit": "sq ft",
+            "affects_price": False,
+            "unit_size": 1,
+        },
         {
             "key": "job_type",
             "label": "Job type",
@@ -124,7 +166,14 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Tiling": [
-        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
+        {
+            "key": "area_sqft",
+            "label": "Area (sq ft)",
+            "type": "number",
+            "unit": "sq ft",
+            "affects_price": False,
+            "unit_size": 1,
+        },
         {
             "key": "surface",
             "label": "Surface",
@@ -133,7 +182,13 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Welding": [
-        {"key": "hours", "label": "Estimated hours", "type": "number"},
+        {
+            "key": "hours",
+            "label": "Estimated hours",
+            "type": "number",
+            "affects_price": True,
+            "unit_size": 1,
+        },
         {
             "key": "job_type",
             "label": "Job type",
@@ -142,7 +197,7 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Home Cleaning": [
-        {"key": "rooms_count", "label": "Number of rooms", "type": "number"},
+        {"key": "rooms_count", "label": "Number of rooms", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "cleaning_type",
             "label": "Cleaning type",
@@ -151,7 +206,7 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Moving Services": [
-        {"key": "rooms_count", "label": "Number of rooms", "type": "number"},
+        {"key": "rooms_count", "label": "Number of rooms", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "distance",
             "label": "Distance",
@@ -160,7 +215,7 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "IT Support": [
-        {"key": "devices_count", "label": "Number of devices", "type": "number"},
+        {"key": "devices_count", "label": "Number of devices", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "support_type",
             "label": "Support type",
@@ -169,7 +224,7 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Data Entry": [
-        {"key": "record_count", "label": "Number of records", "type": "number"},
+        {"key": "record_count", "label": "Number of records", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "format",
             "label": "Source format",
@@ -178,7 +233,7 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Video Editing": [
-        {"key": "minutes", "label": "Video length (minutes)", "type": "number"},
+        {"key": "minutes", "label": "Video length (minutes)", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "edit_type",
             "label": "Edit type",
@@ -187,7 +242,7 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Social Media Marketing": [
-        {"key": "posts_per_month", "label": "Posts per month", "type": "number"},
+        {"key": "posts_per_month", "label": "Posts per month", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "platforms",
             "label": "Platforms",
@@ -196,7 +251,7 @@ SCOPE_SCHEMAS: dict[str, list[dict]] = {
         },
     ],
     "Mobile App Development": [
-        {"key": "screens", "label": "Number of screens", "type": "number"},
+        {"key": "screens", "label": "Number of screens", "type": "number", "affects_price": False, "unit_size": 1},
         {
             "key": "platforms",
             "label": "Platforms",
@@ -230,7 +285,7 @@ BASELINE_PRICES: dict[str, tuple[float, str]] = {
     "Web Development": (75000, "per_job"),
     "Graphic Design": (10000, "per_job"),
     "Photography": (15000, "per_job"),
-    "Content Writing": (3000, "per_job"),
+    "Content Writing": (3000, "per_word"),
     "Home Cleaning": (5000, "per_job"),  # seed list "Cleaning"
 }
 

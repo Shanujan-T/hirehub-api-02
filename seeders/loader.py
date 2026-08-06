@@ -105,7 +105,7 @@ def run_seed(session) -> None:
             cat.set_scope_schema(row["scope_schema"])
         if row.get("baseline_price") is not None:
             cat.baseline_price = row["baseline_price"]
-        if row.get("baseline_unit") in ("per_job", "per_sqft"):
+        if row.get("baseline_unit") in ("per_job", "per_sqft", "per_word", "per_hour"):
             cat.baseline_unit = row["baseline_unit"]
         session.add(cat)
 
@@ -304,6 +304,11 @@ def run_seed(session) -> None:
     apply_scope_schemas()
     apply_baseline_prices()
     apply_historical_jobs()
+    session.flush()
+
+    from app.utils.pricing_utils import seed_district_pricing
+
+    seed_district_pricing()
     session.flush()
 
 

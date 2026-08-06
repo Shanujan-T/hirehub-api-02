@@ -184,7 +184,7 @@
       }
     ],
     "baseline_price": 3000,
-    "baseline_unit": "per_job"
+    "baseline_unit": "per_word"
   },
   {
     "name": "HVAC",
