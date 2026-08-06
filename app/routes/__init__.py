@@ -1,4 +1,5 @@
 from app.routes.auth_routes import auth_bp
+from app.routes.ai_routes import ai_bp
 from app.routes.category_routes import categories_bp
 from app.routes.community_application_routes import community_applications_bp
 from app.routes.community_member_routes import community_members_bp
@@ -16,13 +17,16 @@ from app.routes.skill_routes import skills_bp
 from app.routes.stats_routes import stats_bp
 from app.routes.user_routes import users_bp
 from app.routes.user_skill_routes import user_skills_bp
+from app.routes.work_sample_routes import work_samples_bp
 
 
 def register_blueprints(app):
     app.register_blueprint(auth_bp)
+    app.register_blueprint(ai_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(skills_bp)
     app.register_blueprint(user_skills_bp)
+    app.register_blueprint(work_samples_bp)
     app.register_blueprint(communities_bp)
     app.register_blueprint(community_members_bp)
     app.register_blueprint(open_calls_bp)
