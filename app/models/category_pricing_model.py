@@ -10,6 +10,7 @@ class CategoryPricing(db.Model):
     location = db.Column(db.String(255), nullable=False)
     average_price = db.Column(db.Numeric(10, 2), nullable=False, default=0)
     sample_size = db.Column(db.Integer, nullable=False, default=0)
+    is_seeded_estimate = db.Column(db.Boolean, nullable=False, default=False)
     last_updated = db.Column(db.DateTime, default=utc_now, nullable=False)
 
     __table_args__ = (db.UniqueConstraint("category_id", "location"),)
@@ -23,5 +24,6 @@ class CategoryPricing(db.Model):
             "location": self.location,
             "average_price": float(self.average_price) if self.average_price else 0,
             "sample_size": self.sample_size,
+            "is_seeded_estimate": bool(self.is_seeded_estimate),
             "last_updated": self.last_updated.isoformat() if self.last_updated else None,
         }

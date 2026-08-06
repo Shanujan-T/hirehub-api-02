@@ -13,6 +13,11 @@ class CommunityApplication(db.Model):
         nullable=False,
         default="applied",
     )
+    source = db.Column(
+        db.Enum("applied", "invited", name="community_application_source"),
+        nullable=False,
+        default="applied",
+    )
     proposed_cost = db.Column(db.Numeric(10, 2), nullable=False)
     proposed_days = db.Column(db.Integer, nullable=False)
     note = db.Column(db.Text, nullable=True)
@@ -29,6 +34,7 @@ class CommunityApplication(db.Model):
             "job_id": self.job_id,
             "community_id": self.community_id,
             "status": self.status,
+            "source": self.source or "applied",
             "proposed_cost": float(self.proposed_cost) if self.proposed_cost is not None else 0,
             "proposed_days": self.proposed_days,
             "note": self.note,
