@@ -23,8 +23,10 @@ def _validate_community_payload(data, *, require_review_fields=False):
         category_id = data.get("category_id")
         if not category_id:
             errors.append("category_id is required.")
-        elif not Category.query.get(category_id):
-            errors.append("category_id is invalid.")
+        else:
+            category = Category.query.get(category_id)
+            if not category or category.status != "approved":
+                errors.append("category_id is invalid.")
         experience_level = data.get("experience_level")
         if not experience_level:
             errors.append("experience_level is required.")
