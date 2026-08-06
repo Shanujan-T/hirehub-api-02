@@ -28,6 +28,15 @@ MIGRATION_MODULES = [
     "migrations.009_notifications",
     "migrations.010_message_deletion",
     "migrations.011_ai_match_blurbs",
+    "migrations.012_ai_review_digests",
+    "migrations.013_open_call_description",
+    "migrations.014_category_job_scope",
+    "migrations.015_category_requests",
+    "migrations.016_seed_example_scope_schemas",
+    "migrations.017_bulk_scope_schemas",
+    "migrations.018_category_baseline_price",
+    "migrations.019_contract_health_risk",
+    "migrations.020_work_samples",
 ]
 
 
