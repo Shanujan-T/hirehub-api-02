@@ -1,5 +1,8 @@
+import json
+
 from app.extensions import db
 from app.utils import utc_now
+from app.utils.scope_utils import format_scope_display, parse_json_value
 
 
 class Job(db.Model):
@@ -14,6 +17,7 @@ class Job(db.Model):
     deadline = db.Column(db.Date, nullable=False)
     suggested_price = db.Column(db.Numeric(10, 2), nullable=True)
     final_price = db.Column(db.Numeric(10, 2), nullable=False)
+    scope_data = db.Column(db.Text, nullable=True)
     status = db.Column(
         db.Enum("open", "assigned", "closed", name="job_status"),
         nullable=False,
@@ -28,7 +32,19 @@ class Job(db.Model):
     )
     contract = db.relationship("Contract", back_populates="job", uselist=False)
 
+    def get_scope_data(self):
+        data = parse_json_value(self.scope_data)
+        return data if isinstance(data, dict) else None
+
+    def set_scope_data(self, value):
+        if value is None:
+            self.scope_data = None
+        else:
+            self.scope_data = json.dumps(value, ensure_ascii=False)
+
     def to_dict(self, include_poster=False, strip_poster=False):
+        scope_data = self.get_scope_data()
+        schema = self.category.get_scope_schema() if self.category else None
         data = {
             "id": self.id,
             "category_id": self.category_id,
@@ -38,6 +54,8 @@ class Job(db.Model):
             "deadline": self.deadline.isoformat() if self.deadline else None,
             "suggested_price": float(self.suggested_price) if self.suggested_price else None,
             "final_price": float(self.final_price) if self.final_price else 0,
+            "scope_data": scope_data,
+            "scope_display": format_scope_display(schema, scope_data),
             "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
