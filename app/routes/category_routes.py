@@ -1,4 +1,5 @@
 from flask import Blueprint, request
+from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from app.controllers import category_controller
 from app.middleware import roles_required
@@ -15,6 +16,14 @@ def list_categories():
 @roles_required("admin")
 def create_category():
     return category_controller.create_category(request.get_json() or {})
+
+
+@categories_bp.route("/request", methods=["POST"])
+@jwt_required()
+def request_category():
+    return category_controller.request_category(
+        int(get_jwt_identity()), request.get_json() or {}
+    )
 
 
 @categories_bp.route("/<int:category_id>/pricing-suggestion", methods=["GET"])
@@ -34,6 +43,18 @@ def seed_pricing(category_id):
 def recalc_pricing(category_id):
     location = request.args.get("location", "")
     return category_controller.recalc_pricing(category_id, location)
+
+
+@categories_bp.route("/<int:category_id>/approve", methods=["POST"])
+@roles_required("admin")
+def approve_category(category_id):
+    return category_controller.approve_category(category_id, request.get_json() or {})
+
+
+@categories_bp.route("/<int:category_id>/reject", methods=["POST"])
+@roles_required("admin")
+def reject_category(category_id):
+    return category_controller.reject_category(category_id, request.get_json() or {})
 
 
 @categories_bp.route("/<int:category_id>", methods=["GET"])
