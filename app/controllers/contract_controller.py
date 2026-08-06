@@ -78,6 +78,49 @@ def get_contracts(user_id, user_role):
     return jsonify({"contracts": payload}), 200
 
 
+def get_contracts_needing_attention(user_id, user_role):
+    """Return at-risk contracts visible to this user (poster or community admin)."""
+    from app.utils.contract_health import ensure_fresh_scores
+
+    # Reuse access rules from get_contracts, then filter by risk.
+    if user_role == "admin":
+        contracts = Contract.query.all()
+    else:
+        seen = set()
+        contracts = []
+
+        def add_batch(batch):
+            for c in batch:
+                if c.id not in seen:
+                    seen.add(c.id)
+                    contracts.append(c)
+
+        add_batch(Contract.query.join(Job).filter(Job.posted_by_id == user_id).all())
+        admin_ids = get_admin_community_ids(user_id)
+        if admin_ids:
+            add_batch(Contract.query.filter(Contract.community_id.in_(admin_ids)).all())
+
+    ensure_fresh_scores(contracts)
+
+    at_risk = [c for c in contracts if (c.risk_level or "none") in ("low", "high")]
+    at_risk.sort(key=lambda c: (0 if c.risk_level == "high" else 1, c.id))
+
+    payload = []
+    for c in at_risk:
+        is_poster = _is_job_poster(user_id, c)
+        is_admin = user_role == "admin" or is_community_admin(user_id, c.community_id)
+        if not is_poster and not is_admin:
+            continue
+        payload.append(
+            c.to_dict(
+                include_job=True,
+                strip_poster=not is_poster and not is_admin,
+                include_community=True,
+            )
+        )
+    return jsonify({"contracts": payload, "count": len(payload)}), 200
+
+
 def get_contract(contract_id, user_id, user_role):
     contract = Contract.query.get(contract_id)
     if not contract:
