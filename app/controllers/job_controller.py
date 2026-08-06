@@ -59,6 +59,8 @@ def get_jobs():
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     marketplace = request.args.get("marketplace", "").lower() in ("1", "true", "yes")
+    category_id = request.args.get("category_id", type=int)
+    status = (request.args.get("status") or "").strip().lower() or None
 
     if marketplace:
         if not can_browse_job_marketplace(user_id):
@@ -72,18 +74,27 @@ def get_jobs():
                 403,
             )
         query = Job.query.filter_by(status="open")
+        if category_id:
+            query = query.filter_by(category_id=category_id)
         jobs = query.order_by(Job.created_at.desc()).all()
         return jsonify({"jobs": [j.to_dict(include_poster=True) for j in jobs]}), 200
 
     if user and user.role == "admin":
-        jobs = Job.query.order_by(Job.created_at.desc()).all()
+        query = Job.query
+        if category_id:
+            query = query.filter_by(category_id=category_id)
+        if status in ("open", "assigned", "closed"):
+            query = query.filter_by(status=status)
+        jobs = query.order_by(Job.created_at.desc()).all()
         return jsonify({"jobs": [j.to_dict(include_poster=True) for j in jobs]}), 200
 
-    jobs = (
-        Job.query.filter_by(posted_by_id=user_id)
-        .order_by(Job.created_at.desc())
-        .all()
-    )
+    # Current user's own jobs (employer / job poster). Optional filters for invite dialog.
+    query = Job.query.filter_by(posted_by_id=user_id)
+    if category_id:
+        query = query.filter_by(category_id=category_id)
+    if status in ("open", "assigned", "closed"):
+        query = query.filter_by(status=status)
+    jobs = query.order_by(Job.created_at.desc()).all()
     return jsonify({"jobs": [j.to_dict() for j in jobs]}), 200
 
 

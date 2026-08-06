@@ -64,3 +64,14 @@ def suggest_bid(job_id):
     return ai_features_controller.suggest_bid(
         job_id, int(get_jwt_identity()), request.get_json() or {}
     )
+
+
+@jobs_bp.route("/<int:job_id>/invite", methods=["POST"])
+@jwt_required()
+def invite_community(job_id):
+    from app.controllers import community_application_controller
+
+    data = request.get_json() or {}
+    return community_application_controller.invite_community_to_job(
+        job_id, data.get("community_id"), int(get_jwt_identity())
+    )

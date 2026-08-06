@@ -38,6 +38,18 @@ def seed_pricing(category_id):
     return category_controller.seed_category_pricing(category_id, request.get_json() or {})
 
 
+@categories_bp.route("/<int:category_id>/seed-district-pricing", methods=["POST"])
+@roles_required("admin")
+def seed_district_pricing(category_id):
+    return category_controller.seed_district_pricing_for_category(category_id)
+
+
+@categories_bp.route("/seed-district-pricing", methods=["POST"])
+@roles_required("admin")
+def seed_all_district_pricing():
+    return category_controller.seed_all_district_pricing()
+
+
 @categories_bp.route("/<int:category_id>/recalc-pricing", methods=["POST"])
 @roles_required("admin")
 def recalc_pricing(category_id):

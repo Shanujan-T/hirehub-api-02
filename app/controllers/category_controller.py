@@ -8,8 +8,15 @@ from app.extensions import db
 from app.models.category_model import Category
 from app.models.category_pricing_model import CategoryPricing
 from app.models.user_model import User
-from app.utils.pricing_utils import get_pricing_suggestion, recalc_category_pricing
+from app.utils import utc_now
+from app.utils.pricing_utils import (
+    get_pricing_suggestion,
+    recalc_category_pricing,
+    seed_district_pricing,
+)
 from app.utils.scope_utils import normalize_scope_schema
+
+_ALLOWED_BASELINE_UNITS = ("per_job", "per_sqft", "per_word", "per_hour")
 
 
 def _find_by_name_ci(name: str):
@@ -31,11 +38,15 @@ def _validate_category_payload(data, *, require_name=True):
     errors = []
     if require_name and not data.get("name"):
         errors.append("name is required.")
-    if "scope_schema" in data:
-        _, schema_errors = normalize_scope_schema(data.get("scope_schema"))
+    # scope_fields is an accepted alias for scope_schema
+    if "scope_schema" in data or "scope_fields" in data:
+        raw_schema = data.get("scope_schema", data.get("scope_fields"))
+        _, schema_errors = normalize_scope_schema(raw_schema)
         errors.extend(schema_errors)
-    if "baseline_unit" in data and data.get("baseline_unit") not in (None, "", "per_job", "per_sqft"):
-        errors.append("baseline_unit must be per_job or per_sqft.")
+    if "baseline_unit" in data and data.get("baseline_unit") not in (None, "", *_ALLOWED_BASELINE_UNITS):
+        errors.append(
+            "baseline_unit must be per_job, per_sqft, per_word, or per_hour."
+        )
     if "baseline_price" in data and data.get("baseline_price") not in (None, ""):
         try:
             price = float(data["baseline_price"])
@@ -46,17 +57,29 @@ def _validate_category_payload(data, *, require_name=True):
     return errors
 
 
-def _apply_baseline_fields(cat: Category, data: dict) -> None:
+def _scope_payload(data: dict):
+    """Prefer scope_schema; accept scope_fields as alias."""
+    if "scope_schema" in data:
+        return data.get("scope_schema")
+    if "scope_fields" in data:
+        return data.get("scope_fields")
+    return None
+
+
+def _apply_baseline_fields(cat: Category, data: dict) -> bool:
+    """Apply baseline fields. Returns True if baseline_price changed."""
+    baseline_changed = False
     if "baseline_price" in data:
         raw = data.get("baseline_price")
-        if raw in (None, ""):
-            cat.baseline_price = None
-        else:
-            cat.baseline_price = float(raw)
+        new_price = None if raw in (None, "") else float(raw)
+        old = float(cat.baseline_price) if cat.baseline_price is not None else None
+        if new_price != old:
+            baseline_changed = True
+        cat.baseline_price = new_price
     if "baseline_unit" in data:
         unit = data.get("baseline_unit")
-        cat.baseline_unit = unit if unit in ("per_job", "per_sqft") else None
-
+        cat.baseline_unit = unit if unit in _ALLOWED_BASELINE_UNITS else None
+    return baseline_changed
 
 def create_category(data):
     """Admin-created categories are approved immediately."""
@@ -67,7 +90,7 @@ def create_category(data):
     if _find_by_name_ci(name):
         return jsonify({"error": "Category already exists."}), 409
 
-    schema, _ = normalize_scope_schema(data.get("scope_schema"))
+    schema, _ = normalize_scope_schema(_scope_payload(data) if ("scope_schema" in data or "scope_fields" in data) else None)
     cat = Category(
         name=name,
         status="approved",
@@ -80,6 +103,8 @@ def create_category(data):
     db.session.add(cat)
     try:
         db.session.commit()
+        if cat.baseline_price is not None:
+            seed_district_pricing(cat.id)
         return jsonify({"message": "Category created.", "category": cat.to_dict()}), 201
     except Exception:
         db.session.rollback()
@@ -197,13 +222,22 @@ def update_category(category_id, data):
         if existing and existing.id != cat.id:
             return jsonify({"error": "Category already exists."}), 409
         cat.name = new_name
-    if "scope_schema" in data:
-        schema, _ = normalize_scope_schema(data.get("scope_schema"))
+    if "scope_schema" in data or "scope_fields" in data:
+        schema, _ = normalize_scope_schema(_scope_payload(data))
         cat.set_scope_schema(schema)
-    _apply_baseline_fields(cat, data)
+    baseline_changed = _apply_baseline_fields(cat, data)
     try:
         db.session.commit()
-        return jsonify({"message": "Category updated.", "category": cat.to_dict()}), 200
+        seed_stats = None
+        if baseline_changed and cat.baseline_price is not None:
+            seed_stats = seed_district_pricing(cat.id)
+        payload = {
+            "message": "Category updated.",
+            "category": cat.to_dict(),
+        }
+        if seed_stats is not None:
+            payload["district_pricing_seed"] = seed_stats
+        return jsonify(payload), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to update category."}), 500
@@ -216,16 +250,19 @@ def approve_category(category_id, data: dict):
     if cat.status != "pending":
         return jsonify({"error": "Only pending category requests can be approved."}), 400
 
-    if "scope_schema" in data:
-        schema, schema_errors = normalize_scope_schema(data.get("scope_schema"))
+    if "scope_schema" in data or "scope_fields" in data:
+        schema, schema_errors = normalize_scope_schema(_scope_payload(data))
         if schema_errors:
             return jsonify({"errors": schema_errors}), 400
         cat.set_scope_schema(schema)
 
     cat.status = "approved"
     cat.rejection_reason = None
+    _apply_baseline_fields(cat, data)
     try:
         db.session.commit()
+        if cat.baseline_price is not None:
+            seed_district_pricing(cat.id)
         return (
             jsonify(
                 {
@@ -285,7 +322,8 @@ def pricing_suggestion(category_id, location, scope_data=None):
         return jsonify({"error": "Category not found."}), 404
 
     if scope_data is None:
-        raw = request.args.get("scope_data")
+        # Prefer generic scope_values; keep scope_data for backward compatibility.
+        raw = request.args.get("scope_values") or request.args.get("scope_data")
         if raw:
             try:
                 scope_data = json.loads(raw)
@@ -313,14 +351,23 @@ def seed_category_pricing(category_id, data):
 
     pricing = CategoryPricing.query.filter_by(category_id=category_id, location=location).first()
     if pricing:
+        if pricing.sample_size > 0 and not data.get("force"):
+            return jsonify({
+                "error": "This location already has real contract pricing. "
+                "Pass force=true to overwrite, or use seed-district-pricing for estimates only."
+            }), 409
         pricing.average_price = average_price
         pricing.sample_size = sample_size
+        pricing.is_seeded_estimate = sample_size == 0
+        pricing.last_updated = utc_now()
     else:
         pricing = CategoryPricing(
             category_id=category_id,
             location=location,
             average_price=average_price,
             sample_size=sample_size,
+            is_seeded_estimate=sample_size == 0,
+            last_updated=utc_now(),
         )
         db.session.add(pricing)
     try:
@@ -329,6 +376,32 @@ def seed_category_pricing(category_id, data):
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to seed pricing."}), 500
+
+
+def seed_district_pricing_for_category(category_id):
+    """Admin: re-seed all 25 district estimate rows from category.baseline_price."""
+    cat = Category.query.get(category_id)
+    if not cat:
+        return jsonify({"error": "Category not found."}), 404
+    if cat.baseline_price is None:
+        return jsonify({
+            "error": "Set a baseline_price (Tier-1 Colombo base) before seeding district pricing."
+        }), 400
+    stats = seed_district_pricing(category_id)
+    return jsonify({
+        "message": "District pricing estimates updated for seeded rows only "
+        "(real sample_size > 0 rows were left untouched).",
+        "stats": stats,
+    }), 200
+
+
+def seed_all_district_pricing():
+    """Admin: seed district estimates for every approved category with a baseline."""
+    stats = seed_district_pricing()
+    return jsonify({
+        "message": "District pricing estimates seeded for all categories with a baseline price.",
+        "stats": stats,
+    }), 200
 
 
 def recalc_pricing(category_id, location):
