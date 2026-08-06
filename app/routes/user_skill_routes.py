@@ -1,7 +1,7 @@
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
-from app.controllers import user_skill_controller
+from app.controllers import user_skill_controller, work_sample_controller
 
 user_skills_bp = Blueprint("user_skills", __name__, url_prefix="/api/user-skills")
 
@@ -35,3 +35,15 @@ def update_user_skill(user_skill_id):
 @jwt_required()
 def delete_user_skill(user_skill_id):
     return user_skill_controller.delete_user_skill(user_skill_id)
+
+
+@user_skills_bp.route("/<int:user_skill_id>/work-samples", methods=["GET"])
+@jwt_required()
+def list_work_samples(user_skill_id):
+    return work_sample_controller.list_work_samples(user_skill_id, int(get_jwt_identity()))
+
+
+@user_skills_bp.route("/<int:user_skill_id>/work-samples", methods=["POST"])
+@jwt_required()
+def create_work_sample(user_skill_id):
+    return work_sample_controller.create_work_sample(user_skill_id, int(get_jwt_identity()))
