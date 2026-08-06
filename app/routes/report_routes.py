@@ -1,7 +1,7 @@
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
-from app.controllers import report_controller
+from app.controllers import ai_features_controller, report_controller
 from app.middleware import roles_required
 
 reports_bp = Blueprint("reports", __name__, url_prefix="/api/reports")
@@ -17,6 +17,18 @@ def list_reports():
 @jwt_required()
 def create_report():
     return report_controller.create_report(request.get_json() or {}, get_jwt_identity())
+
+
+@reports_bp.route("/<int:report_id>", methods=["GET"])
+@roles_required("admin")
+def get_report(report_id):
+    return report_controller.get_report(report_id)
+
+
+@reports_bp.route("/<int:report_id>/ai-summary", methods=["GET"])
+@roles_required("admin")
+def report_ai_summary(report_id):
+    return ai_features_controller.summarize_dispute(report_id, int(get_jwt_identity()))
 
 
 @reports_bp.route("/<int:report_id>", methods=["PUT"])
