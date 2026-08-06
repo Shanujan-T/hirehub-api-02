@@ -29,9 +29,15 @@ def create_open_call(data, user_id):
         return jsonify({"errors": errors}), 400
     if not is_community_admin(user_id, data["community_id"]):
         return jsonify({"error": "Forbidden."}), 403
+
+    description = data.get("description")
+    if isinstance(description, str):
+        description = description.strip() or None
+
     oc = OpenCall(
         community_id=data["community_id"],
         title=data["title"],
+        description=description,
     )
     db.session.add(oc)
     try:
@@ -67,6 +73,11 @@ def update_open_call(open_call_id, data, user_id):
         return jsonify({"error": "Forbidden."}), 403
     if "title" in data:
         oc.title = data["title"]
+    if "description" in data:
+        description = data.get("description")
+        oc.description = (
+            description.strip() if isinstance(description, str) and description.strip() else None
+        )
     if "status" in data:
         oc.status = data["status"]
     if "skill_ids" in data:
