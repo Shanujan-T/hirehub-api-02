@@ -17,14 +17,24 @@ from app.models.community_model import Community
 from app.models.contract_model import Contract
 from app.models.job_model import Job
 from app.models.user_model import User
-from app.utils.ai_client import ask_claude
+from app.utils.ai_client import (
+    ask_ai,
+    check_ai_cooldown,
+    cooldown_response,
+    mark_ai_call,
+)
 from app.utils.match_scoring import rank_communities_for_job, rank_jobs_for_community
 
 
 def _parse_json_object(text: str | None) -> dict | None:
+    """Parse a JSON object from model output; None if missing/invalid (treat as AI failure)."""
     if not text:
         return None
     text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+        text = text.strip()
     try:
         data = json.loads(text)
         return data if isinstance(data, dict) else None
@@ -39,13 +49,17 @@ def _parse_json_object(text: str | None) -> dict | None:
             return None
 
 
-def _get_or_create_blurb(job: Job, community: Community, skill_summary: str) -> str | None:
+def _get_or_create_blurb(
+    job: Job, community: Community, skill_summary: str, *, allow_ai: bool = True
+) -> str | None:
     cached = AiMatchBlurb.query.filter_by(job_id=job.id, community_id=community.id).first()
     if cached:
         return cached.blurb
+    if not allow_ai:
+        return None
 
     category_name = job.category.name if job.category else "general"
-    blurb = ask_claude(
+    blurb = ask_ai(
         system_prompt="You write one short sentence explaining why a community fits a job. No fluff.",
         user_prompt=(
             f"Job: {job.title} ({category_name}). {job.description[:280]}\n"
@@ -83,6 +97,8 @@ def recommended_communities_for_job(job_id: int, user_id: int):
         return jsonify({"error": "Only the job poster can view recommended communities."}), 403
 
     ranked = rank_communities_for_job(job, limit=15)
+    allow_ai, _ = check_ai_cooldown(user_id, "match_blurb")
+    generated = False
     results = []
     for index, (community, meta) in enumerate(ranked):
         item = {
@@ -96,10 +112,20 @@ def recommended_communities_for_job(job_id: int, user_id: int):
             "ai_available": False,
         }
         if index < 3:
-            blurb = _get_or_create_blurb(job, community, meta["skill_summary"])
+            cached = AiMatchBlurb.query.filter_by(
+                job_id=job.id, community_id=community.id
+            ).first()
+            blurb = _get_or_create_blurb(
+                job, community, meta["skill_summary"], allow_ai=allow_ai
+            )
+            if blurb and not cached:
+                generated = True
             item["ai_blurb"] = blurb
             item["ai_available"] = blurb is not None
         results.append(item)
+
+    if generated:
+        mark_ai_call(user_id, "match_blurb")
 
     return jsonify({"recommendations": results}), 200
 
@@ -116,6 +142,8 @@ def recommended_jobs_for_community(community_id: int, user_id: int):
         return jsonify({"error": "Community admin access required."}), 403
 
     ranked = rank_jobs_for_community(community, limit=15)
+    allow_ai, _ = check_ai_cooldown(user_id, "match_blurb")
+    generated = False
     results = []
     for index, (job, meta) in enumerate(ranked):
         item = {
@@ -129,10 +157,20 @@ def recommended_jobs_for_community(community_id: int, user_id: int):
             "ai_available": False,
         }
         if index < 3:
-            blurb = _get_or_create_blurb(job, community, meta["skill_summary"])
+            cached = AiMatchBlurb.query.filter_by(
+                job_id=job.id, community_id=community.id
+            ).first()
+            blurb = _get_or_create_blurb(
+                job, community, meta["skill_summary"], allow_ai=allow_ai
+            )
+            if blurb and not cached:
+                generated = True
             item["ai_blurb"] = blurb
             item["ai_available"] = blurb is not None
         results.append(item)
+
+    if generated:
+        mark_ai_call(user_id, "match_blurb")
 
     return jsonify({"recommendations": results}), 200
 
@@ -209,14 +247,19 @@ def suggest_bid(job_id: int, user_id: int, data: dict):
     if not community or community.status != "approved":
         return jsonify({"error": "Community not found or not verified."}), 404
 
+    allowed, retry_after = check_ai_cooldown(user_id, "suggest_bid")
+    if not allowed:
+        return cooldown_response(retry_after)
+
     stats = _community_bid_stats(community_id, job.category_id)
     category_name = job.category.name if job.category else "General"
     deadline = job.deadline.isoformat() if job.deadline else "unspecified"
 
-    raw = ask_claude(
+    mark_ai_call(user_id, "suggest_bid")
+    raw = ask_ai(
         system_prompt=(
             "You suggest a competitive bid for a community job platform. "
-            "Reply with JSON only: "
+            "Reply with a single JSON object only — no markdown, no prose. Schema: "
             '{"suggested_cost": number, "suggested_days": number, "reasoning": "short text"}'
         ),
         user_prompt=(
@@ -269,13 +312,23 @@ def generate_job_description(user_id: int, data: dict):
     if len(rough) > 1000:
         return jsonify({"error": "prompt is too long (max 1000 chars)."}), 400
 
-    categories = Category.query.order_by(Category.name.asc()).all()
+    allowed, retry_after = check_ai_cooldown(user_id, "generate_job")
+    if not allowed:
+        return cooldown_response(retry_after)
+
+    categories = (
+        Category.query.filter_by(status="approved")
+        .order_by(Category.name.asc())
+        .all()
+    )
     category_names = [c.name for c in categories]
     names_line = ", ".join(category_names[:40]) if category_names else "General"
 
-    raw = ask_claude(
+    mark_ai_call(user_id, "generate_job")
+    raw = ask_ai(
         system_prompt=(
-            "You write concise job posts. Reply with JSON only: "
+            "You write concise job posts. Reply with a single JSON object only — "
+            "no markdown fences, no prose. Schema: "
             '{"title":"...","description":"...","suggested_category":"..."} '
             "Use suggested_category from the provided category list when possible."
         ),
@@ -338,7 +391,12 @@ def ai_review_deliverable(contract_id: int, user_id: int):
     if not job:
         return jsonify({"error": "Job not found for contract."}), 404
 
-    review = ask_claude(
+    allowed, retry_after = check_ai_cooldown(user_id, "ai_review")
+    if not allowed:
+        return cooldown_response(retry_after)
+
+    mark_ai_call(user_id, "ai_review")
+    review = ask_ai(
         system_prompt=(
             "You assist community admins reviewing deliverables. "
             "Write 3-5 short plain-text sentences: whether the submission seems to match "
@@ -427,10 +485,19 @@ def join_request_fit_analysis(community_id: int, applicant_user_id: int, admin_u
     overlap_skills = sorted(applicant_names & community_skill_names)
     new_skills_added = sorted(applicant_names - community_skill_names)
 
-    raw = ask_claude(
+    allowed, retry_after = check_ai_cooldown(admin_user_id, "fit_analysis")
+    if not allowed:
+        body, status = cooldown_response(retry_after)
+        # Keep fit-analysis shape for the UI
+        payload = body.get_json()
+        payload["analysis"] = None
+        return jsonify(payload), status
+
+    mark_ai_call(admin_user_id, "fit_analysis")
+    raw = ask_ai(
         system_prompt=(
             "You help community admins review join requests. "
-            "Reply with JSON only: "
+            "Reply with a single JSON object only — no markdown. Schema: "
             '{"fit_summary":"1-2 sentences","overlap_skills":["..."],"new_skills_added":["..."]}'
         ),
         user_prompt=(
@@ -491,3 +558,152 @@ def join_request_fit_analysis(community_id: int, applicant_user_id: int, admin_u
         ),
         200,
     )
+
+
+def _report_context_block(report) -> str:
+    from app.models.message_model import Message
+
+    lines = [
+        f"Report reason: {report.reason}",
+        f"Report status: {report.status}",
+    ]
+    if report.reporter:
+        lines.append(f"Reporter: {report.reporter.full_name}")
+
+    contract = report.contract
+    if not contract:
+        lines.append("No related contract.")
+        return "\n".join(lines)
+
+    job = contract.job
+    community = contract.community
+    poster = None
+    if job and job.posted_by_id:
+        poster = User.query.get(job.posted_by_id)
+    lines.append(f"Contract #{contract.id} status: {contract.status}")
+    lines.append(f"Deliverable: {contract.deliverable_url or 'none submitted'}")
+    if job:
+        lines.append(f"Job: {job.title}")
+    if community:
+        lines.append(f"Community: {community.name}")
+    if poster:
+        lines.append(f"Employer/poster: {poster.full_name}")
+
+    if contract.conversation:
+        messages = (
+            Message.query.filter_by(conversation_id=contract.conversation.id)
+            .filter(Message.deleted_for_everyone.is_(False))
+            .order_by(Message.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        if messages:
+            lines.append("Recent messages:")
+            for msg in reversed(messages):
+                content = (msg.content or "").strip()
+                if content:
+                    lines.append(f"- {content[:160]}")
+    return "\n".join(lines)
+
+
+def summarize_dispute(report_id: int, user_id: int):
+    """Platform-admin AI summary of a report/dispute — display only, never auto-acts."""
+    from app.models.report_model import Report
+
+    user = User.query.get(user_id)
+    if not user or user.role != "admin":
+        return jsonify({"error": "Platform admin access required.", "summary": None}), 403
+
+    report = Report.query.get(report_id)
+    if not report:
+        return jsonify({"error": "Report not found.", "summary": None}), 404
+
+    allowed, retry_after = check_ai_cooldown(user_id, "dispute_summary")
+    if not allowed:
+        return cooldown_response(retry_after)
+
+    mark_ai_call(user_id, "dispute_summary")
+    raw = ask_ai(
+        system_prompt=(
+            "You summarize platform disputes for moderators. "
+            "Reply with a single JSON object only — no markdown. Schema: "
+            '{"summary":"3-5 neutral sentences","suggested_direction":"1-2 sentences as an option"}. '
+            "No blame language. Never issue a directive — frame direction as something to consider."
+        ),
+        user_prompt=_report_context_block(report) + "\nReturn JSON only.",
+        max_tokens=350,
+    )
+    parsed = _parse_json_object(raw)
+    if not parsed:
+        return jsonify({"error": "AI summary unavailable.", "summary": None}), 503
+
+    summary = str(parsed.get("summary") or "").strip()
+    direction = str(parsed.get("suggested_direction") or "").strip()
+    if not summary:
+        return jsonify({"error": "AI summary unavailable.", "summary": None}), 503
+
+    return (
+        jsonify(
+            {
+                "summary": summary,
+                "suggested_direction": direction or None,
+                "assistive": True,
+            }
+        ),
+        200,
+    )
+
+
+def generate_open_call_description(user_id: int, data: dict):
+    """AI recruiting copy for community open calls — draft only, never auto-posts."""
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "Unauthorized.", "suggestion": None}), 401
+
+    rough = (data.get("prompt") or data.get("rough_input") or data.get("title") or "").strip()
+    if not rough:
+        return jsonify({"error": "title or prompt is required.", "suggestion": None}), 400
+
+    skills = data.get("required_skills") or data.get("skills") or []
+    if isinstance(skills, list):
+        skills_line = ", ".join(str(s).strip() for s in skills if str(s).strip())
+    else:
+        skills_line = str(skills).strip()
+
+    allowed, retry_after = check_ai_cooldown(user_id, "open_call_description")
+    if not allowed:
+        return cooldown_response(retry_after)
+
+    mark_ai_call(user_id, "open_call_description")
+    raw = ask_ai(
+        system_prompt=(
+            "You write short recruiting copy for a skilled community open call. "
+            "Tone: inviting team recruitment (e.g. we're looking for a React developer to join), "
+            "not client job posting. Reply with a single JSON object only — no markdown. Schema: "
+            '{"description":"..."} Keep under 100 words.'
+        ),
+        user_prompt=(
+            f"Open call title/prompt: {rough}\n"
+            f"Required skills: {skills_line or 'not specified'}\n"
+            "Return JSON only."
+        ),
+        max_tokens=280,
+    )
+    parsed = _parse_json_object(raw)
+    if not parsed:
+        return jsonify({"error": "AI suggestion unavailable.", "suggestion": None}), 503
+
+    description = str(parsed.get("description") or "").strip()
+    if not description:
+        return jsonify({"error": "AI suggestion unavailable.", "suggestion": None}), 503
+
+    return jsonify({"suggestion": {"description": description}, "assistive": True}), 200
+
+
+def get_community_review_digest(community_id: int):
+    from app.utils.review_digest_utils import get_review_digest
+
+    community = Community.query.get(community_id)
+    if not community:
+        return jsonify({"error": "Community not found."}), 404
+    return jsonify({"digest": get_review_digest(community_id)}), 200
