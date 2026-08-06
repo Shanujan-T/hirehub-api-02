@@ -94,7 +94,20 @@ def run_seed(session) -> None:
     session.flush()
 
     for row in _load_json("categories"):
-        session.add(Category(name=row["name"]))
+        cat = Category(
+            name=row["name"],
+            status=row.get("status", "approved"),
+            requested_by_id=row.get("requested_by_id"),
+            request_description=row.get("request_description") or row.get("description"),
+            rejection_reason=row.get("rejection_reason"),
+        )
+        if row.get("scope_schema") is not None:
+            cat.set_scope_schema(row["scope_schema"])
+        if row.get("baseline_price") is not None:
+            cat.baseline_price = row["baseline_price"]
+        if row.get("baseline_unit") in ("per_job", "per_sqft"):
+            cat.baseline_unit = row["baseline_unit"]
+        session.add(cat)
 
     session.flush()
 
@@ -155,19 +168,20 @@ def run_seed(session) -> None:
     session.flush()
 
     for row in _load_json("jobs"):
-        session.add(
-            Job(
-                posted_by_id=row["posted_by_id"],
-                category_id=row["category_id"],
-                title=row["title"],
-                description=row["description"],
-                location=row["location"],
-                deadline=_parse_date(row["deadline"]),
-                suggested_price=Decimal(str(row["suggested_price"])) if row.get("suggested_price") is not None else None,
-                final_price=Decimal(str(row["final_price"])),
-                status=row["status"],
-            )
+        job = Job(
+            posted_by_id=row["posted_by_id"],
+            category_id=row["category_id"],
+            title=row["title"],
+            description=row["description"],
+            location=row["location"],
+            deadline=_parse_date(row["deadline"]),
+            suggested_price=Decimal(str(row["suggested_price"])) if row.get("suggested_price") is not None else None,
+            final_price=Decimal(str(row["final_price"])),
+            status=row["status"],
         )
+        if row.get("scope_data") is not None:
+            job.set_scope_data(row["scope_data"])
+        session.add(job)
 
     session.flush()
 
@@ -279,6 +293,18 @@ def run_seed(session) -> None:
     session.flush()
 
     _refresh_community_reputation(session)
+
+    # Ensure scope schemas + historical completed jobs with scope_data for pricing demos
+    from seeders.seed_scope_schemas import (
+        apply_baseline_prices,
+        apply_historical_jobs,
+        apply_scope_schemas,
+    )
+
+    apply_scope_schemas()
+    apply_baseline_prices()
+    apply_historical_jobs()
+    session.flush()
 
 
 def _refresh_community_reputation(session) -> None:
