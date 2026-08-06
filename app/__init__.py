@@ -13,6 +13,7 @@ from app.routes import register_blueprints
 
 _GROUP_ORDER = [
     "auth",
+    "ai",
     "users",
     "skills",
     "user_skills",
@@ -39,6 +40,7 @@ _PRICING_PATH_MARKERS = ("/pricing-suggestion", "/seed-pricing", "/recalc-pricin
 
 _BLUEPRINT_DEFAULT_GROUP = {
     "auth": "auth",
+    "ai": "ai",
     "users": "users",
     "skills": "skills",
     "user_skills": "user_skills",
@@ -99,11 +101,14 @@ _DESCRIPTIONS = {
     ("GET", "/api/open-calls/:id"): "Get a single open call",
     ("PUT", "/api/open-calls/:id"): "Update an open call",
     ("DELETE", "/api/open-calls/:id"): "Delete an open call",
-    ("GET", "/api/categories"): "List job categories",
-    ("POST", "/api/categories"): "Create a category",
+    ("GET", "/api/categories"): "List approved job categories (admin: ?status=pending|all)",
+    ("POST", "/api/categories"): "Create an approved category (admin)",
+    ("POST", "/api/categories/request"): "Request a new category (pending admin review)",
     ("GET", "/api/categories/:id"): "Get a single category",
-    ("PUT", "/api/categories/:id"): "Update a category",
+    ("PUT", "/api/categories/:id"): "Update a category / scope schema (admin)",
     ("DELETE", "/api/categories/:id"): "Delete a category",
+    ("POST", "/api/categories/:id/approve"): "Approve a pending category request (admin)",
+    ("POST", "/api/categories/:id/reject"): "Reject a pending category request (admin)",
     ("GET", "/api/categories/:id/pricing-suggestion"): "Get suggested price for category + location",
     ("POST", "/api/categories/:id/seed-pricing"): "Seed pricing data for a category",
     ("POST", "/api/categories/:id/recalc-pricing"): "Recalculate category pricing by location",
@@ -113,6 +118,8 @@ _DESCRIPTIONS = {
     ("PUT", "/api/jobs/:id"): "Update a job posting",
     ("DELETE", "/api/jobs/:id"): "Delete a job posting",
     ("GET", "/api/jobs/:id/applications"): "List applications for a job",
+    ("POST", "/api/ai/concierge"): "AI Community Concierge Q&A (user-scoped)",
+    ("GET", "/api/ai/concierge"): "AI Community Concierge availability status",
     ("GET", "/api/jobs/:id/recommended-communities"): "Ranked community matches for a job (poster)",
     ("POST", "/api/jobs/:id/suggest-bid"): "AI bid suggestion for a community admin",
     ("POST", "/api/jobs/generate-description"): "AI job title/description/category generator",
@@ -124,6 +131,7 @@ _DESCRIPTIONS = {
     ("POST", "/api/community-applications/:id/approve"): "Approve a community application",
     ("POST", "/api/community-applications/:id/reject"): "Reject a community application",
     ("GET", "/api/contracts"): "List contracts for current user",
+    ("GET", "/api/contracts/needs-attention"): "List at-risk contracts needing attention",
     ("GET", "/api/contracts/:id"): "Get a single contract",
     ("POST", "/api/contracts/:id/open-internally"): "Open contract for internal hiring",
     ("POST", "/api/contracts/:id/select-member"): "Select a member for contract",
@@ -134,6 +142,10 @@ _DESCRIPTIONS = {
     ("POST", "/api/contracts/:id/ai-review-deliverable"): "AI assistive pre-check for a submitted deliverable",
     ("GET", "/api/contracts/:id/messages"): "List contract conversation messages",
     ("POST", "/api/contracts/:id/messages"): "Send a contract conversation message",
+    ("POST", "/api/contracts/:id/messages/suggest-reply"): "AI suggested reply draft for contract chat",
+    ("POST", "/api/user-skills/:id/work-samples"): "Add a work sample for a user skill",
+    ("GET", "/api/user-skills/:id/work-samples"): "List work samples for a user skill",
+    ("POST", "/api/work-samples/:id/verify"): "AI-verify a work sample (text or best-effort image)",
     ("GET", "/api/contract-applications/my"): "List my contract applications",
     ("POST", "/api/contract-applications/apply"): "Apply to an open contract",
     ("GET", "/api/contract-applications/contract/:id"): "List applications for a contract",
@@ -149,7 +161,11 @@ _DESCRIPTIONS = {
     ("PATCH", "/api/notifications/read-all"): "Mark all notifications read",
     ("GET", "/api/reports"): "List moderation reports",
     ("POST", "/api/reports"): "Submit a moderation report",
+    ("GET", "/api/reports/:id"): "Get a single moderation report",
+    ("GET", "/api/reports/:id/ai-summary"): "AI dispute summary for platform admins",
     ("PUT", "/api/reports/:id"): "Update a report status",
+    ("GET", "/api/communities/:id/review-digest"): "Cached AI review sentiment digest",
+    ("POST", "/api/open-calls/generate-description"): "AI open-call recruiting description draft",
 }
 
 
@@ -260,6 +276,7 @@ def create_app():
     with app.app_context():
         from app.models import (  # noqa: F401
             ai_match_blurb_model,
+            ai_review_digest_model,
             category_model,
             category_pricing_model,
             community_application_model,
@@ -280,6 +297,7 @@ def create_app():
             user_model,
             user_skill_model,
             verification_otp_model,
+            work_sample_model,
         )
 
         try:
@@ -292,6 +310,9 @@ def create_app():
     register_blueprints(app)
 
     from . import socket_events  # noqa: F401
+    from app.scheduler import start_scheduler_once
+
+    start_scheduler_once(app)
 
     @app.route("/")
     def api_home():
