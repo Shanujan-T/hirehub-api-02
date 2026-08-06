@@ -25,7 +25,8 @@ def init_schedulers(app) -> None:
     want_digest = _truthy("ENABLE_WEEKLY_DIGEST_SCHEDULER")
     # Health monitor on by default so dashboards stay fresh in local/dev.
     want_health = _truthy("ENABLE_CONTRACT_HEALTH_SCHEDULER", "true")
-    if not want_digest and not want_health:
+    want_col = _truthy("ENABLE_COL_INDEX_SCHEDULER")
+    if not want_digest and not want_health and not want_col:
         return
 
     try:
@@ -33,7 +34,8 @@ def init_schedulers(app) -> None:
     except ImportError:
         logger.warning(
             "APScheduler is not installed; schedulers disabled. "
-            "Install APScheduler or set ENABLE_WEEKLY_DIGEST_SCHEDULER / ENABLE_CONTRACT_HEALTH_SCHEDULER."
+            "Install APScheduler or set ENABLE_WEEKLY_DIGEST_SCHEDULER / "
+            "ENABLE_CONTRACT_HEALTH_SCHEDULER / ENABLE_COL_INDEX_SCHEDULER."
         )
         return
 
@@ -80,6 +82,35 @@ def init_schedulers(app) -> None:
             _health_job()
         except Exception:
             logger.exception("Contract health bootstrap scan failed")
+
+    if want_col:
+
+        def _col_index_job():
+            with app.app_context():
+                from app.scripts.fetch_district_col_index import fetch_and_build
+                from app.utils.pricing_utils import seed_district_pricing
+
+                # Refresh Numbeo cache (falls back to last cache on Apify failure),
+                # then re-seed only estimate rows.
+                payload = fetch_and_build(skip_fetch=False)
+                stats = seed_district_pricing()
+                logger.info(
+                    "Monthly COL refresh: districts=%s seed=%s",
+                    len((payload or {}).get("districts") or {}),
+                    stats,
+                )
+
+        # First day of each month at 03:30 — respects free-tier by batching inside the script.
+        scheduler.add_job(
+            _col_index_job,
+            trigger="cron",
+            day=1,
+            hour=3,
+            minute=30,
+            id="district_col_index",
+            replace_existing=True,
+        )
+        logger.info("District COL index scheduler started (monthly, day 1 @ 03:30).")
 
     scheduler.start()
     _scheduler = scheduler
