@@ -1,25 +1,82 @@
-from flask import jsonify
+import json
+
+from flask import jsonify, request
+from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+from sqlalchemy import func
 
 from app.extensions import db
 from app.models.category_model import Category
 from app.models.category_pricing_model import CategoryPricing
+from app.models.user_model import User
 from app.utils.pricing_utils import get_pricing_suggestion, recalc_category_pricing
+from app.utils.scope_utils import normalize_scope_schema
 
 
-def _validate_category_payload(data):
+def _find_by_name_ci(name: str):
+    return Category.query.filter(func.lower(Category.name) == name.strip().lower()).first()
+
+
+def _optional_admin_user():
+    verify_jwt_in_request(optional=True)
+    identity = get_jwt_identity()
+    if not identity:
+        return None
+    user = User.query.get(int(identity))
+    if user and user.role == "admin":
+        return user
+    return None
+
+
+def _validate_category_payload(data, *, require_name=True):
     errors = []
-    if not data.get("name"):
+    if require_name and not data.get("name"):
         errors.append("name is required.")
+    if "scope_schema" in data:
+        _, schema_errors = normalize_scope_schema(data.get("scope_schema"))
+        errors.extend(schema_errors)
+    if "baseline_unit" in data and data.get("baseline_unit") not in (None, "", "per_job", "per_sqft"):
+        errors.append("baseline_unit must be per_job or per_sqft.")
+    if "baseline_price" in data and data.get("baseline_price") not in (None, ""):
+        try:
+            price = float(data["baseline_price"])
+            if price < 0:
+                errors.append("baseline_price must be >= 0.")
+        except (TypeError, ValueError):
+            errors.append("baseline_price must be a number.")
     return errors
 
 
+def _apply_baseline_fields(cat: Category, data: dict) -> None:
+    if "baseline_price" in data:
+        raw = data.get("baseline_price")
+        if raw in (None, ""):
+            cat.baseline_price = None
+        else:
+            cat.baseline_price = float(raw)
+    if "baseline_unit" in data:
+        unit = data.get("baseline_unit")
+        cat.baseline_unit = unit if unit in ("per_job", "per_sqft") else None
+
+
 def create_category(data):
+    """Admin-created categories are approved immediately."""
     errors = _validate_category_payload(data)
     if errors:
         return jsonify({"errors": errors}), 400
-    if Category.query.filter_by(name=data["name"]).first():
+    name = str(data["name"]).strip()
+    if _find_by_name_ci(name):
         return jsonify({"error": "Category already exists."}), 409
-    cat = Category(name=data["name"])
+
+    schema, _ = normalize_scope_schema(data.get("scope_schema"))
+    cat = Category(
+        name=name,
+        status="approved",
+        requested_by_id=None,
+        request_description=None,
+        rejection_reason=None,
+    )
+    cat.set_scope_schema(schema)
+    _apply_baseline_fields(cat, data)
     db.session.add(cat)
     try:
         db.session.commit()
@@ -29,8 +86,89 @@ def create_category(data):
         return jsonify({"error": "Failed to create category."}), 500
 
 
+def request_category(user_id: int, data: dict):
+    """Any authenticated user can request a new category (pending until admin approves)."""
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required."}), 400
+    if len(name) < 2:
+        return jsonify({"error": "name must be at least 2 characters."}), 400
+    if len(name) > 255:
+        return jsonify({"error": "name is too long."}), 400
+
+    if _find_by_name_ci(name):
+        return (
+            jsonify(
+                {
+                    "error": "A category with this name already exists or is pending review.",
+                }
+            ),
+            409,
+        )
+
+    description = str(data.get("description") or data.get("request_description") or "").strip()
+    if len(description) > 1000:
+        return jsonify({"error": "description is too long (max 1000 chars)."}), 400
+
+    cat = Category(
+        name=name,
+        status="pending",
+        requested_by_id=user_id,
+        request_description=description or None,
+        rejection_reason=None,
+    )
+    db.session.add(cat)
+    try:
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "message": "Your category request is pending admin review.",
+                    "category": cat.to_dict(),
+                }
+            ),
+            201,
+        )
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to submit category request."}), 500
+
+
 def get_categories():
-    categories = Category.query.all()
+    """
+    Public/default: approved only.
+    Admin may pass ?status=pending|approved|rejected|all for moderation.
+    """
+    status = (request.args.get("status") or "approved").strip().lower()
+    admin = _optional_admin_user()
+
+    if status != "approved":
+        if not admin:
+            return jsonify({"error": "Admin access required."}), 403
+        query = Category.query
+        if status == "all":
+            pass
+        elif status in ("pending", "approved", "rejected"):
+            query = query.filter_by(status=status)
+        else:
+            return jsonify({"error": "Invalid status filter."}), 400
+        categories = query.order_by(Category.created_at.desc()).all()
+        return (
+            jsonify(
+                {
+                    "categories": [
+                        c.to_dict(include_requester=True) for c in categories
+                    ]
+                }
+            ),
+            200,
+        )
+
+    categories = (
+        Category.query.filter_by(status="approved")
+        .order_by(Category.name.asc())
+        .all()
+    )
     return jsonify({"categories": [c.to_dict() for c in categories]}), 200
 
 
@@ -38,6 +176,11 @@ def get_category(category_id):
     cat = Category.query.get(category_id)
     if not cat:
         return jsonify({"error": "Category not found."}), 404
+    if cat.status != "approved":
+        admin = _optional_admin_user()
+        if not admin:
+            return jsonify({"error": "Category not found."}), 404
+        return jsonify({"category": cat.to_dict(include_requester=True)}), 200
     return jsonify({"category": cat.to_dict()}), 200
 
 
@@ -45,14 +188,82 @@ def update_category(category_id, data):
     cat = Category.query.get(category_id)
     if not cat:
         return jsonify({"error": "Category not found."}), 404
+    errors = _validate_category_payload(data, require_name=False)
+    if errors:
+        return jsonify({"errors": errors}), 400
     if "name" in data:
-        cat.name = data["name"]
+        new_name = str(data["name"]).strip()
+        existing = _find_by_name_ci(new_name)
+        if existing and existing.id != cat.id:
+            return jsonify({"error": "Category already exists."}), 409
+        cat.name = new_name
+    if "scope_schema" in data:
+        schema, _ = normalize_scope_schema(data.get("scope_schema"))
+        cat.set_scope_schema(schema)
+    _apply_baseline_fields(cat, data)
     try:
         db.session.commit()
         return jsonify({"message": "Category updated.", "category": cat.to_dict()}), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to update category."}), 500
+
+
+def approve_category(category_id, data: dict):
+    cat = Category.query.get(category_id)
+    if not cat:
+        return jsonify({"error": "Category not found."}), 404
+    if cat.status != "pending":
+        return jsonify({"error": "Only pending category requests can be approved."}), 400
+
+    if "scope_schema" in data:
+        schema, schema_errors = normalize_scope_schema(data.get("scope_schema"))
+        if schema_errors:
+            return jsonify({"errors": schema_errors}), 400
+        cat.set_scope_schema(schema)
+
+    cat.status = "approved"
+    cat.rejection_reason = None
+    try:
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "message": "Category approved.",
+                    "category": cat.to_dict(include_requester=True),
+                }
+            ),
+            200,
+        )
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to approve category."}), 500
+
+
+def reject_category(category_id, data: dict):
+    cat = Category.query.get(category_id)
+    if not cat:
+        return jsonify({"error": "Category not found."}), 404
+    if cat.status != "pending":
+        return jsonify({"error": "Only pending category requests can be rejected."}), 400
+
+    reason = str(data.get("reason") or data.get("rejection_reason") or "").strip()
+    cat.status = "rejected"
+    cat.rejection_reason = reason or None
+    try:
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "message": "Category rejected.",
+                    "category": cat.to_dict(include_requester=True),
+                }
+            ),
+            200,
+        )
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to reject category."}), 500
 
 
 def delete_category(category_id):
@@ -68,11 +279,25 @@ def delete_category(category_id):
         return jsonify({"error": "Failed to delete category."}), 500
 
 
-def pricing_suggestion(category_id, location):
+def pricing_suggestion(category_id, location, scope_data=None):
     cat = Category.query.get(category_id)
-    if not cat:
+    if not cat or cat.status != "approved":
         return jsonify({"error": "Category not found."}), 404
-    result = get_pricing_suggestion(category_id, location)
+
+    if scope_data is None:
+        raw = request.args.get("scope_data")
+        if raw:
+            try:
+                scope_data = json.loads(raw)
+            except json.JSONDecodeError:
+                scope_data = None
+
+    result = get_pricing_suggestion(
+        category_id,
+        location,
+        scope_data=scope_data,
+        scope_schema=cat.get_scope_schema(),
+    )
     return jsonify(result), 200
 
 
