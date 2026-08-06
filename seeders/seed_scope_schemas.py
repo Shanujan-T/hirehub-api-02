@@ -1,0 +1,587 @@
+"""Idempotent bulk seed: category scope_schema + historical completed jobs with scope_data.
+
+Safe to re-run. Does not wipe the database.
+Usage (from hirehub-api-02):
+  set PYTHONPATH=.
+  python -m seeders.seed_scope_schemas
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import date, timedelta
+from decimal import Decimal
+
+from app import create_app
+from app.extensions import db
+from app.models.category_model import Category
+from app.models.contract_model import Contract
+from app.models.job_model import Job
+from app.models.user_model import User
+from app.utils import utc_now
+
+SCOPE_SCHEMAS: dict[str, list[dict]] = {
+    "Web Development": [
+        {"key": "pages", "label": "Number of pages", "type": "number"},
+        {
+            "key": "features",
+            "label": "Features needed",
+            "type": "multiselect",
+            "options": [
+                "Portfolio",
+                "Blog/CMS",
+                "E-commerce",
+                "User Auth",
+                "Payment Integration",
+                "Custom Admin Dashboard",
+            ],
+        },
+    ],
+    "Landscaping": [
+        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
+    ],
+    "Plumbing": [
+        {"key": "fixtures_count", "label": "Number of fixtures", "type": "number"},
+        {
+            "key": "job_type",
+            "label": "Job type",
+            "type": "select",
+            "options": ["Repair", "Installation", "Emergency"],
+        },
+    ],
+    "Electrical": [
+        {"key": "rooms_count", "label": "Number of rooms", "type": "number"},
+        {
+            "key": "job_type",
+            "label": "Job type",
+            "type": "select",
+            "options": ["Repair", "New Wiring", "Inspection"],
+        },
+    ],
+    "Graphic Design": [
+        {
+            "key": "deliverables",
+            "label": "Deliverables needed",
+            "type": "multiselect",
+            "options": [
+                "Logo",
+                "Brand Guide",
+                "Business Cards",
+                "Social Media Kit",
+                "Packaging Design",
+                "Print Ads",
+            ],
+        },
+        {"key": "revisions", "label": "Number of revision rounds", "type": "number"},
+    ],
+    "Carpentry": [
+        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
+        {
+            "key": "material",
+            "label": "Material",
+            "type": "select",
+            "options": ["Softwood", "Hardwood", "Composite"],
+        },
+    ],
+    "Photography": [
+        {"key": "hours", "label": "Estimated hours", "type": "number"},
+        {
+            "key": "package",
+            "label": "Package",
+            "type": "select",
+            "options": ["Basic", "Standard", "Premium"],
+        },
+    ],
+    "Content Writing": [
+        {"key": "word_count", "label": "Word count", "type": "number"},
+        {
+            "key": "content_type",
+            "label": "Content type",
+            "type": "select",
+            "options": ["Blog Post", "Website Copy", "Technical Docs"],
+        },
+    ],
+    "Painting": [
+        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
+        {"key": "coats", "label": "Number of coats", "type": "number"},
+    ],
+    "HVAC": [
+        {"key": "units_count", "label": "Number of units", "type": "number"},
+        {
+            "key": "job_type",
+            "label": "Job type",
+            "type": "select",
+            "options": ["Repair", "Installation", "Maintenance"],
+        },
+    ],
+    "Roofing": [
+        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
+        {
+            "key": "job_type",
+            "label": "Job type",
+            "type": "select",
+            "options": ["Repair", "Replacement", "Inspection"],
+        },
+    ],
+    "Tiling": [
+        {"key": "area_sqft", "label": "Area (sq ft)", "type": "number", "unit": "sq ft"},
+        {
+            "key": "surface",
+            "label": "Surface",
+            "type": "select",
+            "options": ["Floor", "Wall", "Bathroom", "Kitchen Backsplash"],
+        },
+    ],
+    "Welding": [
+        {"key": "hours", "label": "Estimated hours", "type": "number"},
+        {
+            "key": "job_type",
+            "label": "Job type",
+            "type": "select",
+            "options": ["Repair", "Fabrication", "On-site Welding"],
+        },
+    ],
+    "Home Cleaning": [
+        {"key": "rooms_count", "label": "Number of rooms", "type": "number"},
+        {
+            "key": "cleaning_type",
+            "label": "Cleaning type",
+            "type": "select",
+            "options": ["Standard", "Deep Clean", "Move-out"],
+        },
+    ],
+    "Moving Services": [
+        {"key": "rooms_count", "label": "Number of rooms", "type": "number"},
+        {
+            "key": "distance",
+            "label": "Distance",
+            "type": "select",
+            "options": ["Local", "Intercity", "Long Distance"],
+        },
+    ],
+    "IT Support": [
+        {"key": "devices_count", "label": "Number of devices", "type": "number"},
+        {
+            "key": "support_type",
+            "label": "Support type",
+            "type": "select",
+            "options": ["Setup", "Troubleshooting", "Network", "Security"],
+        },
+    ],
+    "Data Entry": [
+        {"key": "record_count", "label": "Number of records", "type": "number"},
+        {
+            "key": "format",
+            "label": "Source format",
+            "type": "select",
+            "options": ["Spreadsheets", "Scanned Docs", "Forms", "Database Export"],
+        },
+    ],
+    "Video Editing": [
+        {"key": "minutes", "label": "Video length (minutes)", "type": "number"},
+        {
+            "key": "edit_type",
+            "label": "Edit type",
+            "type": "select",
+            "options": ["Basic Cut", "Color Grade", "Motion Graphics", "Full Production"],
+        },
+    ],
+    "Social Media Marketing": [
+        {"key": "posts_per_month", "label": "Posts per month", "type": "number"},
+        {
+            "key": "platforms",
+            "label": "Platforms",
+            "type": "multiselect",
+            "options": ["Instagram", "Facebook", "TikTok", "LinkedIn", "YouTube"],
+        },
+    ],
+    "Mobile App Development": [
+        {"key": "screens", "label": "Number of screens", "type": "number"},
+        {
+            "key": "platforms",
+            "label": "Platforms",
+            "type": "multiselect",
+            "options": ["iOS", "Android", "Cross-platform"],
+        },
+    ],
+}
+
+# Primary pricing locations from category_pricing seed (category name → location)
+_PRIMARY_LOCATION = {
+    "Web Development": "Colombo",
+    "Plumbing": "Kandy",
+    "Electrical": "Galle",
+    "Carpentry": "Kandy",
+    "Photography": "Matara",
+    "Painting": "Negombo",
+    "Content Writing": "Colombo",
+    "Landscaping": "Kandy",
+}
+
+TITLE_PREFIX = "[Scope seed]"
+
+# LKR baseline estimates used when no local historical pricing exists.
+BASELINE_PRICES: dict[str, tuple[float, str]] = {
+    "Painting": (100, "per_sqft"),
+    "Landscaping": (150, "per_sqft"),
+    "Plumbing": (6000, "per_job"),
+    "Electrical": (7000, "per_job"),
+    "Carpentry": (8000, "per_job"),
+    "Web Development": (75000, "per_job"),
+    "Graphic Design": (10000, "per_job"),
+    "Photography": (15000, "per_job"),
+    "Content Writing": (3000, "per_job"),
+    "Home Cleaning": (5000, "per_job"),  # seed list "Cleaning"
+}
+
+
+def apply_baseline_prices() -> int:
+    updated = 0
+    for name, (price, unit) in BASELINE_PRICES.items():
+        cat = Category.query.filter_by(name=name).first()
+        if not cat:
+            # Alias support
+            if name == "Home Cleaning":
+                cat = Category.query.filter_by(name="Cleaning").first()
+            if not cat:
+                print(f"Skip baseline: category '{name}' not found")
+                continue
+        cat.baseline_price = price
+        cat.baseline_unit = unit
+        updated += 1
+        print(f"Set baseline: {cat.name} = {price} ({unit})")
+    return updated
+
+
+def _historical_rows() -> list[dict]:
+    """At least 3 completed jobs per scoped category, same location, realistic scope_data."""
+    rows: list[dict] = []
+
+    # Web Development — Colombo (pages × ~250 + feature premiums)
+    for i, (pages, features, amount) in enumerate(
+        [
+            (5, ["Portfolio", "Blog/CMS"], 1800),
+            (10, ["Portfolio", "User Auth", "Custom Admin Dashboard"], 3200),
+            (8, ["E-commerce", "User Auth", "Payment Integration"], 4100),
+            (12, ["Blog/CMS", "E-commerce", "Payment Integration"], 4500),
+        ],
+        start=1,
+    ):
+        rows.append(
+            {
+                "category": "Web Development",
+                "title": f"{TITLE_PREFIX} Web site #{i}",
+                "location": "Colombo",
+                "amount": amount,
+                "scope_data": {"pages": pages, "features": features},
+            }
+        )
+
+    # Landscaping — Kandy (area 200–2000, ~0.35–0.55 / sqft)
+    for i, (area, amount) in enumerate(
+        [(280, 120), (650, 280), (1200, 520), (1800, 780)], start=1
+    ):
+        rows.append(
+            {
+                "category": "Landscaping",
+                "title": f"{TITLE_PREFIX} Landscape job #{i}",
+                "location": "Kandy",
+                "amount": amount,
+                "scope_data": {"area_sqft": area},
+            }
+        )
+
+    # Plumbing — Kandy
+    for i, (fixtures, job_type, amount) in enumerate(
+        [
+            (2, "Repair", 95),
+            (5, "Installation", 240),
+            (3, "Emergency", 180),
+            (8, "Installation", 360),
+        ],
+        start=1,
+    ):
+        rows.append(
+            {
+                "category": "Plumbing",
+                "title": f"{TITLE_PREFIX} Plumbing job #{i}",
+                "location": "Kandy",
+                "amount": amount,
+                "scope_data": {"fixtures_count": fixtures, "job_type": job_type},
+            }
+        )
+
+    # Electrical — Galle
+    for i, (rooms, job_type, amount) in enumerate(
+        [
+            (2, "Repair", 140),
+            (4, "New Wiring", 380),
+            (3, "Inspection", 160),
+            (6, "New Wiring", 520),
+        ],
+        start=1,
+    ):
+        rows.append(
+            {
+                "category": "Electrical",
+                "title": f"{TITLE_PREFIX} Electrical job #{i}",
+                "location": "Galle",
+                "amount": amount,
+                "scope_data": {"rooms_count": rooms, "job_type": job_type},
+            }
+        )
+
+    # Carpentry — Kandy
+    for i, (area, material, amount) in enumerate(
+        [
+            (120, "Softwood", 320),
+            (250, "Hardwood", 680),
+            (180, "Composite", 450),
+            (400, "Hardwood", 980),
+        ],
+        start=1,
+    ):
+        rows.append(
+            {
+                "category": "Carpentry",
+                "title": f"{TITLE_PREFIX} Carpentry job #{i}",
+                "location": "Kandy",
+                "amount": amount,
+                "scope_data": {"area_sqft": area, "material": material},
+            }
+        )
+
+    # Photography — Matara
+    for i, (hours, package, amount) in enumerate(
+        [
+            (3, "Basic", 180),
+            (6, "Standard", 360),
+            (8, "Premium", 520),
+            (4, "Standard", 280),
+        ],
+        start=1,
+    ):
+        rows.append(
+            {
+                "category": "Photography",
+                "title": f"{TITLE_PREFIX} Photography job #{i}",
+                "location": "Matara",
+                "amount": amount,
+                "scope_data": {"hours": hours, "package": package},
+            }
+        )
+
+    # Content Writing — Colombo
+    for i, (words, content_type, amount) in enumerate(
+        [
+            (800, "Blog Post", 90),
+            (1500, "Website Copy", 180),
+            (3000, "Technical Docs", 320),
+            (1200, "Blog Post", 130),
+        ],
+        start=1,
+    ):
+        rows.append(
+            {
+                "category": "Content Writing",
+                "title": f"{TITLE_PREFIX} Writing job #{i}",
+                "location": "Colombo",
+                "amount": amount,
+                "scope_data": {"word_count": words, "content_type": content_type},
+            }
+        )
+
+    # Painting — Negombo
+    for i, (area, coats, amount) in enumerate(
+        [
+            (400, 1, 160),
+            (900, 2, 340),
+            (1500, 2, 520),
+            (600, 3, 280),
+        ],
+        start=1,
+    ):
+        rows.append(
+            {
+                "category": "Painting",
+                "title": f"{TITLE_PREFIX} Painting job #{i}",
+                "location": "Negombo",
+                "amount": amount,
+                "scope_data": {"area_sqft": area, "coats": coats},
+            }
+        )
+
+    # Graphic Design — Colombo
+    for i, (deliverables, revisions, amount) in enumerate(
+        [
+            (["Logo"], 2, 280),
+            (["Logo", "Brand Guide", "Business Cards"], 3, 650),
+            (["Social Media Kit", "Print Ads"], 2, 420),
+            (["Logo", "Packaging Design"], 4, 780),
+        ],
+        start=1,
+    ):
+        rows.append(
+            {
+                "category": "Graphic Design",
+                "title": f"{TITLE_PREFIX} Design job #{i}",
+                "location": "Colombo",
+                "amount": amount,
+                "scope_data": {"deliverables": deliverables, "revisions": revisions},
+            }
+        )
+
+    return rows
+
+
+def apply_scope_schemas() -> int:
+    updated = 0
+    for name, schema in SCOPE_SCHEMAS.items():
+        cat = Category.query.filter_by(name=name).first()
+        if not cat:
+            print(f"Skip schema: category '{name}' not found")
+            continue
+        cat.set_scope_schema(schema)
+        if cat.status != "approved":
+            cat.status = "approved"
+        updated += 1
+        print(f"Set scope_schema: {name}")
+
+    missing = [
+        c.name
+        for c in Category.query.order_by(Category.name.asc()).all()
+        if not c.get_scope_schema()
+    ]
+    if missing:
+        print(f"Still without scope_schema (intentional or unknown): {missing}")
+    else:
+        print("All categories now have a scope_schema.")
+    return updated
+
+
+def _poster_id() -> int:
+    user = User.query.filter_by(role="user").order_by(User.id.asc()).first()
+    if user:
+        return user.id
+    admin = User.query.order_by(User.id.asc()).first()
+    if not admin:
+        raise RuntimeError("No users found — run full seeders first.")
+    return admin.id
+
+
+def _community_id_for_category(category_id: int) -> int | None:
+    from app.models.community_model import Community
+
+    community = (
+        Community.query.filter_by(category_id=category_id, status="approved")
+        .order_by(Community.id.asc())
+        .first()
+    )
+    if community:
+        return community.id
+    any_approved = Community.query.filter_by(status="approved").order_by(Community.id.asc()).first()
+    return any_approved.id if any_approved else None
+
+
+def _member_for_community(community_id: int) -> int | None:
+    from app.models.community_member_model import CommunityMember
+
+    member = (
+        CommunityMember.query.filter_by(community_id=community_id, status="approved")
+        .order_by(CommunityMember.id.asc())
+        .first()
+    )
+    return member.user_id if member else None
+
+
+def apply_historical_jobs() -> int:
+    poster_id = _poster_id()
+    created = 0
+    base_deadline = date.today() + timedelta(days=30)
+
+    for row in _historical_rows():
+        title = row["title"]
+        existing = Job.query.filter_by(title=title).first()
+        if existing:
+            # Refresh scope_data if job already exists
+            existing.set_scope_data(row["scope_data"])
+            continue
+
+        cat = Category.query.filter_by(name=row["category"]).first()
+        if not cat:
+            print(f"Skip job: category '{row['category']}' missing")
+            continue
+
+        community_id = _community_id_for_category(cat.id)
+        if not community_id:
+            print(f"Skip job '{title}': no community available")
+            continue
+        member_id = _member_for_community(community_id)
+
+        amount = Decimal(str(row["amount"]))
+        job = Job(
+            posted_by_id=poster_id,
+            category_id=cat.id,
+            title=title,
+            description=f"Seeded historical job for scope-aware pricing ({row['category']}).",
+            location=row["location"],
+            deadline=base_deadline,
+            suggested_price=amount,
+            final_price=amount,
+            status="closed",
+        )
+        job.set_scope_data(row["scope_data"])
+        db.session.add(job)
+        db.session.flush()
+
+        commission = (amount * Decimal("0.03")).quantize(Decimal("0.01"))
+        contract = Contract(
+            job_id=job.id,
+            community_id=community_id,
+            assigned_member_id=member_id,
+            total_amount=amount,
+            commission_percent=Decimal("3"),
+            commission_amount=commission,
+            member_payout=amount - commission,
+            status="completed",
+            deliverable_url=f"https://example.com/deliverables/scope-seed-{job.id}",
+            created_at=utc_now(),
+        )
+        db.session.add(contract)
+        created += 1
+        print(f"Created historical job: {title}")
+
+    return created
+
+
+def run() -> None:
+    app = create_app()
+    with app.app_context():
+        schemas = apply_scope_schemas()
+        baselines = apply_baseline_prices()
+        jobs = apply_historical_jobs()
+        db.session.commit()
+        print(
+            json.dumps(
+                {
+                    "schemas_updated": schemas,
+                    "baselines_updated": baselines,
+                    "jobs_created_or_refreshed": jobs,
+                },
+                indent=2,
+            )
+        )
+
+        # Quick verify
+        for name in ("Landscaping", "Web Development", "Home Cleaning"):
+            cat = Category.query.filter_by(name=name).first()
+            schema = cat.get_scope_schema() if cat else None
+            print(
+                f"verify {name}: fields={[f.get('key') for f in (schema or [])]} "
+                f"baseline={getattr(cat, 'baseline_price', None)} "
+                f"unit={getattr(cat, 'baseline_unit', None)}"
+            )
+
+
+if __name__ == "__main__":
+    run()
