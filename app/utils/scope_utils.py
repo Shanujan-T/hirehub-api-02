@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-ALLOWED_SCOPE_TYPES = frozenset({"number", "select", "multiselect"})
+ALLOWED_SCOPE_TYPES = frozenset({"number", "select", "multiselect", "text"})
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -27,8 +27,26 @@ def dump_json_value(value: Any) -> str | None:
     return json.dumps(value, ensure_ascii=False)
 
 
+def pricing_fields(schema: list[dict] | None) -> list[dict]:
+    """Numeric scope fields that participate in price scaling."""
+    if not schema:
+        return []
+    return [
+        f
+        for f in schema
+        if isinstance(f, dict)
+        and f.get("type") == "number"
+        and bool(f.get("affects_price"))
+    ]
+
+
+def pricing_unit_from_schema(schema: list[dict] | None) -> str:
+    """Return 'scaled' when any affects_price number field exists, else 'flat'."""
+    return "scaled" if pricing_fields(schema) else "flat"
+
+
 def normalize_scope_schema(raw: Any) -> tuple[list[dict] | None, list[str]]:
-    """Validate and normalize a scope_schema payload. Empty/null clears schema."""
+    """Validate and normalize a scope_schema / scope_fields payload. Empty/null clears schema."""
     errors: list[str] = []
     if raw is None or raw == "" or raw == []:
         return None, errors
@@ -63,7 +81,7 @@ def normalize_scope_schema(raw: Any) -> tuple[list[dict] | None, list[str]]:
             continue
         if field_type not in ALLOWED_SCOPE_TYPES:
             errors.append(
-                f"scope_schema[{index}].type must be one of: number, select, multiselect."
+                f"scope_schema[{index}].type must be one of: number, select, multiselect, text."
             )
             continue
 
@@ -76,6 +94,26 @@ def normalize_scope_schema(raw: Any) -> tuple[list[dict] | None, list[str]]:
         unit = str(item.get("unit") or "").strip()
         if unit:
             field["unit"] = unit
+
+        # Pricing participation — only meaningful for number fields.
+        if field_type == "number":
+            affects = item.get("affects_price")
+            if affects is None:
+                affects = False
+            field["affects_price"] = bool(affects)
+            unit_size_raw = item.get("unit_size", 1)
+            try:
+                unit_size = float(unit_size_raw)
+            except (TypeError, ValueError):
+                errors.append(f"scope_schema[{index}].unit_size must be a number.")
+                continue
+            if unit_size <= 0:
+                errors.append(f"scope_schema[{index}].unit_size must be > 0.")
+                continue
+            # Prefer ints when whole numbers (e.g. per 100 words).
+            field["unit_size"] = int(unit_size) if unit_size == int(unit_size) else unit_size
+        else:
+            field["affects_price"] = False
 
         if field_type in ("select", "multiselect"):
             options = item.get("options") or []
@@ -145,6 +183,13 @@ def validate_scope_data(schema: list[dict] | None, raw_data: Any) -> tuple[dict 
                 errors.append(f"scope_data.{key} must be greater than 0.")
                 continue
             cleaned[key] = int(number) if number == int(number) else number
+        elif field_type == "text":
+            text = str(value).strip()
+            if not text:
+                if required:
+                    errors.append(f"scope_data.{key} ({field['label']}) is required.")
+                continue
+            cleaned[key] = text
         elif field_type == "select":
             text = str(value).strip()
             options = field.get("options") or []
@@ -175,11 +220,8 @@ def validate_scope_data(schema: list[dict] | None, raw_data: Any) -> tuple[dict 
                 continue
             cleaned[key] = unique
 
-    # Ignore unknown keys silently (forward-compatible), or warn:
-    unknown = [k for k in data.keys() if k not in schema_keys]
-    if unknown:
-        # Drop unknowns rather than error — posters shouldn't fail on stale UI.
-        pass
+    # Ignore unknown keys silently (forward-compatible)
+    _ = [k for k in data.keys() if k not in schema_keys]
 
     if errors:
         return None, errors
@@ -207,3 +249,32 @@ def format_scope_display(schema: list[dict] | None, scope_data: dict | None) -> 
                 display = f"{display} {unit}".strip()
         rows.append({"key": key, "label": field["label"], "value": display})
     return rows
+
+
+def format_unit_phrase(field: dict) -> str:
+    """Human-readable 'per 100 words' / 'per sq ft' style phrase for captions."""
+    label = str(field.get("label") or field.get("key") or "unit").strip()
+    unit = str(field.get("unit") or "").strip()
+    try:
+        unit_size = float(field.get("unit_size") or 1)
+    except (TypeError, ValueError):
+        unit_size = 1.0
+    if unit_size == int(unit_size):
+        size_disp = str(int(unit_size))
+    else:
+        size_disp = str(unit_size)
+
+    # Prefer short unit when present ("sq ft"), else lowercased label ("word count" → words-ish).
+    if unit:
+        noun = unit
+    else:
+        noun = label.lower()
+        # Mild plural tidy: "Word count" → "words" if it ends with "count"
+        if noun.endswith(" count"):
+            noun = noun[: -len(" count")].strip() + "s"
+        elif noun.endswith("y") and not noun.endswith(("ay", "ey", "oy", "uy")):
+            noun = noun[:-1] + "ies"
+
+    if unit_size == 1:
+        return f"per {noun}"
+    return f"per {size_disp} {noun}"
