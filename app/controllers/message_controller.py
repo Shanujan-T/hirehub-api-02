@@ -126,6 +126,84 @@ def send_message(contract_id, user_id, data):
     return jsonify({"message": payload}), 201
 
 
+def suggest_reply(contract_id, user_id):
+    """AI-suggested reply draft from recent conversation messages."""
+    from app.utils.ai_client import (
+        ask_ai,
+        check_ai_cooldown,
+        cooldown_response,
+        mark_ai_call,
+    )
+
+    contract = Contract.query.get(contract_id)
+    if not contract:
+        return jsonify({"error": "Contract not found.", "suggestion": None}), 404
+    if not can_access_contract_conversation(user_id, contract):
+        return jsonify({"error": "Forbidden.", "suggestion": None}), 403
+
+    conversation, error = get_conversation_for_contract(contract_id, user_id)
+    if error:
+        # normalize to include suggestion: null
+        body, code = error if isinstance(error, tuple) else (error, 400)
+        try:
+            data = body.get_json() if hasattr(body, "get_json") else {}
+        except Exception:
+            data = {}
+        data = dict(data or {})
+        data["suggestion"] = None
+        return jsonify(data), code
+
+    allowed, retry_after = check_ai_cooldown(user_id, "suggest_reply")
+    if not allowed:
+        return cooldown_response(retry_after)
+
+    recent = (
+        Message.query.filter_by(conversation_id=conversation.id, deleted_for_everyone=False)
+        .order_by(Message.created_at.desc())
+        .limit(12)
+        .all()
+    )
+    recent = list(reversed(recent))
+    if not recent:
+        return jsonify(
+            {
+                "error": "No messages yet to base a reply on.",
+                "suggestion": None,
+                "available": False,
+            }
+        ), 400
+
+    lines = []
+    for msg in recent:
+        if not msg.is_visible_to(user_id):
+            continue
+        who = "You" if msg.sender_id == user_id else (msg.sender.full_name if msg.sender else "Them")
+        lines.append(f"{who}: {msg.content}")
+
+    mark_ai_call(user_id, "suggest_reply")
+    job_title = contract.job.title if contract.job else "this contract"
+    suggestion = ask_ai(
+        system_prompt=(
+            "You help write short, professional chat replies for a freelance marketplace. "
+            "Match the conversation's tone. Reply with ONLY the suggested message text — "
+            "no quotes, labels, or preamble."
+        ),
+        user_prompt=(
+            f"Job/contract: {job_title}\n"
+            "Recent messages:\n"
+            + "\n".join(lines[-10:])
+            + "\n\nSuggest the next reply from 'You'."
+        ),
+        max_tokens=220,
+    )
+    if not suggestion:
+        return jsonify(
+            {"error": "AI suggestion unavailable.", "suggestion": None, "available": False}
+        ), 503
+
+    return jsonify({"suggestion": suggestion.strip().strip('"'), "available": True}), 200
+
+
 def delete_message_for_me(message_id, user_id):
     message, error = _get_message_if_participant(message_id, user_id)
     if error:
