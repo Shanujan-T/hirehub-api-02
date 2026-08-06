@@ -37,6 +37,10 @@ MIGRATION_MODULES = [
     "migrations.018_category_baseline_price",
     "migrations.019_contract_health_risk",
     "migrations.020_work_samples",
+    "migrations.021_community_application_source",
+    "migrations.022_category_pricing_units",
+    "migrations.023_district_pricing_seed",
+    "migrations.024_scope_fields_affects_price",
 ]
 
 
