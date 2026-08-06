@@ -27,6 +27,14 @@ class Contract(db.Model):
         default="pending_assignment",
     )
     deliverable_url = db.Column(db.String(512), nullable=True)
+    risk_level = db.Column(
+        db.Enum("none", "low", "high", name="contract_risk_level"),
+        nullable=False,
+        default="none",
+    )
+    risk_reason = db.Column(db.Text, nullable=True)
+    risk_flags = db.Column(db.String(255), nullable=True)
+    risk_checked_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
     job = db.relationship("Job", back_populates="contract")
@@ -55,6 +63,12 @@ class Contract(db.Model):
             "member_payout": float(self.member_payout) if self.member_payout else None,
             "status": self.status,
             "deliverable_url": self.deliverable_url,
+            "risk_level": self.risk_level or "none",
+            "risk_reason": self.risk_reason,
+            "risk_flags": (
+                [f for f in (self.risk_flags or "").split(",") if f] if self.risk_flags else []
+            ),
+            "risk_checked_at": self.risk_checked_at.isoformat() if self.risk_checked_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
         if include_job and self.job:
