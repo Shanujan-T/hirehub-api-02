@@ -56,10 +56,19 @@ def create_review(data, reviewer_id):
 
     try:
         db.session.commit()
-        return jsonify({"message": "Review created.", "review": review.to_dict()}), 201
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to create review."}), 500
+
+    # Event-driven digest refresh (same pattern as category pricing recalc)
+    try:
+        from app.utils.review_digest_utils import recalc_review_digest
+
+        recalc_review_digest(int(data["community_id"]))
+    except Exception:
+        pass
+
+    return jsonify({"message": "Review created.", "review": review.to_dict()}), 201
 
 
 def get_reviews(community_id=None, member_id=None):
