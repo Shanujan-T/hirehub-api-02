@@ -10,6 +10,7 @@ from app.models.community_application_model import CommunityApplication
 from app.models.contract_model import Contract
 from app.models.job_model import Job
 from app.models.user_model import User
+from app.utils.scope_utils import validate_scope_data
 
 
 def create_job():
@@ -22,13 +23,19 @@ def create_job():
             return jsonify({"error": f"Missing required field: {field}"}), 400
 
     category = Category.query.get(data["category_id"])
-    if not category:
+    if not category or category.status != "approved":
         return jsonify({"error": "Invalid category."}), 400
 
     try:
         deadline = datetime.strptime(data["deadline"], "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"error": "Invalid deadline format. Use YYYY-MM-DD."}), 400
+
+    scope_data, scope_errors = validate_scope_data(
+        category.get_scope_schema(), data.get("scope_data")
+    )
+    if scope_errors:
+        return jsonify({"error": scope_errors[0], "errors": scope_errors}), 400
 
     job = Job(
         posted_by_id=user_id,
@@ -41,6 +48,7 @@ def create_job():
         final_price=data["final_price"],
         status="open",
     )
+    job.set_scope_data(scope_data)
     db.session.add(job)
     db.session.commit()
 
@@ -114,9 +122,21 @@ def update_job(job_id):
         except ValueError:
             return jsonify({"error": "Invalid deadline format."}), 400
     if "category_id" in data:
-        if not Category.query.get(data["category_id"]):
+        category = Category.query.get(data["category_id"])
+        if not category or category.status != "approved":
             return jsonify({"error": "Invalid category."}), 400
         job.category_id = data["category_id"]
+
+    if "scope_data" in data or "category_id" in data:
+        category = Category.query.get(job.category_id)
+        scope_payload = data["scope_data"] if "scope_data" in data else job.get_scope_data()
+        scope_data, scope_errors = validate_scope_data(
+            category.get_scope_schema() if category else None,
+            scope_payload,
+        )
+        if scope_errors:
+            return jsonify({"error": scope_errors[0], "errors": scope_errors}), 400
+        job.set_scope_data(scope_data)
 
     db.session.commit()
     return jsonify({"message": "Job updated.", "job": job.to_dict()}), 200
