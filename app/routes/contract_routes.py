@@ -19,6 +19,13 @@ def list_contracts():
     return contract_controller.get_contracts(user_id, user_role)
 
 
+@contracts_bp.route("/needs-attention", methods=["GET"])
+@jwt_required()
+def contracts_needing_attention():
+    user_id, user_role = _current_user()
+    return contract_controller.get_contracts_needing_attention(user_id, user_role)
+
+
 @contracts_bp.route("/<int:contract_id>", methods=["GET"])
 @jwt_required()
 def get_contract(contract_id):
@@ -87,3 +94,9 @@ def send_contract_message(contract_id):
     return message_controller.send_message(
         contract_id, int(get_jwt_identity()), request.get_json() or {}
     )
+
+
+@contracts_bp.route("/<int:contract_id>/messages/suggest-reply", methods=["POST"])
+@jwt_required()
+def suggest_contract_reply(contract_id):
+    return message_controller.suggest_reply(contract_id, int(get_jwt_identity()))
