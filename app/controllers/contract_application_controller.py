@@ -18,7 +18,6 @@ def apply_to_contract(contract_id, user_id, data):
         community_id=contract.community_id,
         user_id=user_id,
         status="approved",
-        role="member",
     ).first()
     if not membership:
         return jsonify({"error": "Must be an approved community member."}), 403
