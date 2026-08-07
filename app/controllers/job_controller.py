@@ -2,6 +2,7 @@ from datetime import datetime
 
 from flask import jsonify, request
 from flask_jwt_extended import get_jwt_identity
+from sqlalchemy import func
 
 from app.extensions import db
 from app.middleware import can_browse_job_marketplace
@@ -10,7 +11,26 @@ from app.models.community_application_model import CommunityApplication
 from app.models.contract_model import Contract
 from app.models.job_model import Job
 from app.models.user_model import User
+from app.utils import title_case_words
 from app.utils.scope_utils import validate_scope_data
+
+
+def _jobs_with_application_counts(jobs, *, include_poster=False):
+    """Serialize jobs and attach CommunityApplication counts in one query."""
+    if not jobs:
+        return []
+    ids = [j.id for j in jobs]
+    rows = (
+        db.session.query(CommunityApplication.job_id, func.count(CommunityApplication.id))
+        .filter(CommunityApplication.job_id.in_(ids))
+        .group_by(CommunityApplication.job_id)
+        .all()
+    )
+    counts = {job_id: int(n) for job_id, n in rows}
+    return [
+        j.to_dict(include_poster=include_poster, application_count=counts.get(j.id, 0))
+        for j in jobs
+    ]
 
 
 def create_job():
@@ -40,9 +60,9 @@ def create_job():
     job = Job(
         posted_by_id=user_id,
         category_id=data["category_id"],
-        title=data["title"],
+        title=title_case_words(data["title"]),
         description=data["description"],
-        location=data["location"],
+        location=title_case_words(data["location"]),
         deadline=deadline,
         suggested_price=data.get("suggested_price"),
         final_price=data["final_price"],
@@ -77,7 +97,7 @@ def get_jobs():
         if category_id:
             query = query.filter_by(category_id=category_id)
         jobs = query.order_by(Job.created_at.desc()).all()
-        return jsonify({"jobs": [j.to_dict(include_poster=True) for j in jobs]}), 200
+        return jsonify({"jobs": _jobs_with_application_counts(jobs, include_poster=True)}), 200
 
     if user and user.role == "admin":
         query = Job.query
@@ -86,7 +106,7 @@ def get_jobs():
         if status in ("open", "assigned", "closed"):
             query = query.filter_by(status=status)
         jobs = query.order_by(Job.created_at.desc()).all()
-        return jsonify({"jobs": [j.to_dict(include_poster=True) for j in jobs]}), 200
+        return jsonify({"jobs": _jobs_with_application_counts(jobs, include_poster=True)}), 200
 
     # Current user's own jobs (employer / job poster). Optional filters for invite dialog.
     query = Job.query.filter_by(posted_by_id=user_id)
@@ -95,7 +115,7 @@ def get_jobs():
     if status in ("open", "assigned", "closed"):
         query = query.filter_by(status=status)
     jobs = query.order_by(Job.created_at.desc()).all()
-    return jsonify({"jobs": [j.to_dict() for j in jobs]}), 200
+    return jsonify({"jobs": _jobs_with_application_counts(jobs)}), 200
 
 
 def get_job(job_id):
@@ -126,7 +146,10 @@ def update_job(job_id):
     data = request.get_json() or {}
     for field in ("title", "description", "location", "final_price", "suggested_price"):
         if field in data:
-            setattr(job, field, data[field])
+            value = data[field]
+            if field in ("title", "location") and isinstance(value, str):
+                value = title_case_words(value)
+            setattr(job, field, value)
     if "deadline" in data:
         try:
             job.deadline = datetime.strptime(data["deadline"], "%Y-%m-%d").date()
