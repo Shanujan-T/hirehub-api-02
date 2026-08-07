@@ -24,6 +24,12 @@ def request_join(community_id, user_id):
     ).first()
     if existing:
         return jsonify({"error": "Already requested or member."}), 409
+
+    from app.models.user_skill_model import UserSkill
+    skill_count = UserSkill.query.filter_by(user_id=user_id).count()
+    if skill_count == 0:
+        return jsonify({"error": "Add at least one skill to your profile before joining a community."}), 400
+
     membership = CommunityMember(
         community_id=community_id,
         user_id=user_id,
