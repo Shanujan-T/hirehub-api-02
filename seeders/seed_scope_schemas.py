@@ -276,23 +276,23 @@ _PRIMARY_LOCATION = {
 TITLE_PREFIX = "[Scope seed]"
 
 # LKR baseline estimates used when no local historical pricing exists.
-BASELINE_PRICES: dict[str, tuple[float, str]] = {
-    "Painting": (100, "per_sqft"),
-    "Landscaping": (150, "per_sqft"),
-    "Plumbing": (6000, "per_job"),
-    "Electrical": (7000, "per_job"),
-    "Carpentry": (8000, "per_job"),
-    "Web Development": (75000, "per_job"),
-    "Graphic Design": (10000, "per_job"),
-    "Photography": (15000, "per_job"),
-    "Content Writing": (3000, "per_word"),
-    "Home Cleaning": (5000, "per_job"),  # seed list "Cleaning"
+BASELINE_PRICES: dict[str, tuple[float, str | None]] = {
+    "Painting": (100, "area_sqft"),
+    "Landscaping": (150, "area_sqft"),
+    "Plumbing": (6000, None),
+    "Electrical": (7000, None),
+    "Carpentry": (40, "area_sqft"),
+    "Web Development": (75000, None),
+    "Graphic Design": (10000, None),
+    "Photography": (1500, "hours"),
+    "Content Writing": (25, "word_count"),
+    "Home Cleaning": (5000, None),  # seed list "Cleaning"
 }
 
 
 def apply_baseline_prices() -> int:
     updated = 0
-    for name, (price, unit) in BASELINE_PRICES.items():
+    for name, (price, scope_key) in BASELINE_PRICES.items():
         cat = Category.query.filter_by(name=name).first()
         if not cat:
             # Alias support
@@ -302,9 +302,9 @@ def apply_baseline_prices() -> int:
                 print(f"Skip baseline: category '{name}' not found")
                 continue
         cat.baseline_price = price
-        cat.baseline_unit = unit
+        cat.baseline_scope_key = scope_key
         updated += 1
-        print(f"Set baseline: {cat.name} = {price} ({unit})")
+        print(f"Set baseline: {cat.name} = {price} ({scope_key})")
     return updated
 
 
@@ -634,7 +634,7 @@ def run() -> None:
             print(
                 f"verify {name}: fields={[f.get('key') for f in (schema or [])]} "
                 f"baseline={getattr(cat, 'baseline_price', None)} "
-                f"unit={getattr(cat, 'baseline_unit', None)}"
+                f"scope_key={getattr(cat, 'baseline_scope_key', None)}"
             )
 
 

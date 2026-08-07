@@ -105,8 +105,8 @@ def run_seed(session) -> None:
             cat.set_scope_schema(row["scope_schema"])
         if row.get("baseline_price") is not None:
             cat.baseline_price = row["baseline_price"]
-        if row.get("baseline_unit") in ("per_job", "per_sqft", "per_word", "per_hour"):
-            cat.baseline_unit = row["baseline_unit"]
+        if "baseline_scope_key" in row:
+            cat.baseline_scope_key = row["baseline_scope_key"]
         session.add(cat)
 
     session.flush()

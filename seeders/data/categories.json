@@ -23,7 +23,7 @@
       }
     ],
     "baseline_price": 75000,
-    "baseline_unit": "per_job"
+    "baseline_scope_key": null
   },
   {
     "name": "Plumbing",
@@ -46,7 +46,7 @@
       }
     ],
     "baseline_price": 6000,
-    "baseline_unit": "per_job"
+    "baseline_scope_key": null
   },
   {
     "name": "Electrical",
@@ -69,7 +69,7 @@
       }
     ],
     "baseline_price": 7000,
-    "baseline_unit": "per_job"
+    "baseline_scope_key": null
   },
   {
     "name": "Graphic Design",
@@ -95,7 +95,7 @@
       }
     ],
     "baseline_price": 10000,
-    "baseline_unit": "per_job"
+    "baseline_scope_key": null
   },
   {
     "name": "Carpentry",
@@ -118,8 +118,8 @@
         ]
       }
     ],
-    "baseline_price": 8000,
-    "baseline_unit": "per_job"
+    "baseline_price": 40,
+    "baseline_scope_key": "area_sqft"
   },
   {
     "name": "Photography",
@@ -141,8 +141,8 @@
         ]
       }
     ],
-    "baseline_price": 15000,
-    "baseline_unit": "per_job"
+    "baseline_price": 1500,
+    "baseline_scope_key": "hours"
   },
   {
     "name": "Painting",
@@ -161,7 +161,7 @@
       }
     ],
     "baseline_price": 100,
-    "baseline_unit": "per_sqft"
+    "baseline_scope_key": "area_sqft"
   },
   {
     "name": "Content Writing",
@@ -183,8 +183,8 @@
         ]
       }
     ],
-    "baseline_price": 3000,
-    "baseline_unit": "per_word"
+    "baseline_price": 25,
+    "baseline_scope_key": "word_count"
   },
   {
     "name": "HVAC",
@@ -219,7 +219,7 @@
       }
     ],
     "baseline_price": 150,
-    "baseline_unit": "per_sqft"
+    "baseline_scope_key": "area_sqft"
   },
   {
     "name": "Roofing",
@@ -308,7 +308,7 @@
       }
     ],
     "baseline_price": 5000,
-    "baseline_unit": "per_job"
+    "baseline_scope_key": null
   },
   {
     "name": "Moving Services",
