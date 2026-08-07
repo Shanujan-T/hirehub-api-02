@@ -41,5 +41,5 @@ class ContractApplication(db.Model):
             "applied_at": self.applied_at.isoformat() if self.applied_at else None,
         }
         if include_member and self.member:
-            data["member"] = self.member.to_dict(include_stats=True)
+            data["member"] = self.member.to_dict(include_stats=True, include_skills=True)
         return data

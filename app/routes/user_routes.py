@@ -1,4 +1,4 @@
-from flask import Blueprint, request
+from flask import Blueprint, request, jsonify
 
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
@@ -146,10 +146,53 @@ def review_identity_verification(user_id):
 
 
 @users_bp.route("/<int:user_id>", methods=["DELETE"])
-
 @jwt_required()
-
 def delete_user(user_id):
-
     return user_controller.delete_user(user_id, get_jwt_identity())
+
+
+@users_bp.route("/me/skills", methods=["GET"])
+@jwt_required()
+def get_my_skills():
+    user_id = int(get_jwt_identity())
+    from app.controllers import user_skill_controller
+    return user_skill_controller.get_user_skills(user_id)
+
+
+@users_bp.route("/me/skills", methods=["POST"])
+@jwt_required()
+def create_my_skill():
+    user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
+    data["user_id"] = user_id
+    from app.controllers import user_skill_controller
+    return user_skill_controller.create_user_skill(data)
+
+
+@users_bp.route("/me/skills/<int:user_skill_id>", methods=["PUT"])
+@jwt_required()
+def update_my_skill(user_skill_id):
+    user_id = int(get_jwt_identity())
+    from app.models.user_skill_model import UserSkill
+    us = UserSkill.query.get(user_skill_id)
+    if not us:
+        return jsonify({"error": "User skill not found."}), 404
+    if us.user_id != user_id:
+        return jsonify({"error": "Unauthorized to update this skill."}), 403
+    from app.controllers import user_skill_controller
+    return user_skill_controller.update_user_skill(user_skill_id, request.get_json() or {})
+
+
+@users_bp.route("/me/skills/<int:user_skill_id>", methods=["DELETE"])
+@jwt_required()
+def delete_my_skill(user_skill_id):
+    user_id = int(get_jwt_identity())
+    from app.models.user_skill_model import UserSkill
+    us = UserSkill.query.get(user_skill_id)
+    if not us:
+        return jsonify({"error": "User skill not found."}), 404
+    if us.user_id != user_id:
+        return jsonify({"error": "Unauthorized to delete this skill."}), 403
+    from app.controllers import user_skill_controller
+    return user_skill_controller.delete_user_skill(user_skill_id)
 

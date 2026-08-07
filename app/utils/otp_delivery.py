@@ -53,13 +53,16 @@ def send_identity_sms_otp(phone: str, code: str) -> None:
         try:
             from twilio.rest import Client
 
-            Client(account_sid, auth_token).messages.create(
+            logger.info("Sending Twilio SMS to %s using from_=%s (account_sid=%s)", phone, from_number, account_sid)
+            client = Client(account_sid, auth_token)
+            res = client.messages.create(
                 body=message,
                 from_=from_number,
                 to=phone,
             )
+            logger.info("Twilio SMS sent successfully. SID: %s, Status: %s", getattr(res, 'sid', None), getattr(res, 'status', None))
             return
         except Exception as exc:
-            logger.warning("Twilio SMS failed (%s); falling back to log", exc)
+            logger.exception("Twilio SMS failed with exception: %s", exc)
 
     logger.info("Identity SMS OTP for %s: %s (configure TWILIO_* to send real SMS)", phone, code)
