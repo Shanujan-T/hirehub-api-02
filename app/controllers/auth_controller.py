@@ -43,7 +43,7 @@ def register(data):
     return jsonify({
         "message": "Registered successfully.",
         "access_token": token,
-        "user": user.to_dict(viewer_id=user.id, viewer_role=user.role),
+        "user": user.to_dict(viewer_id=user.id, viewer_role=user.role, include_skills=True),
     }), 201
 
 
@@ -62,7 +62,7 @@ def login(data):
     token = create_access_token(identity=str(user.id))
     return jsonify({
         "access_token": token,
-        "user": user.to_dict(viewer_id=user.id, viewer_role=user.role),
+        "user": user.to_dict(viewer_id=user.id, viewer_role=user.role, include_skills=True),
     }), 200
 
 
@@ -73,5 +73,5 @@ def get_me(user_id):
     if not user.is_active:
         return jsonify({"error": "Account suspended."}), 403
     return jsonify({
-        "user": user.to_dict(viewer_id=user.id, viewer_role=user.role, include_stats=True),
+        "user": user.to_dict(viewer_id=user.id, viewer_role=user.role, include_stats=True, include_skills=True),
     }), 200
