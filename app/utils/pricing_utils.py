@@ -329,15 +329,6 @@ def _result(price, sample_size, method, note, *, is_seeded_estimate: bool = Fals
     }
 
 
-def _scale_reference_price(
-    reference: float, category: Category | None, scope_data: dict, schema=None
-) -> float:
-    """Apply generic scope scaling to a district/base reference price."""
-    schema = _schema_for(category, schema)
-    factor, _used = _scope_scale_factor(schema, scope_data or {})
-    return round(float(reference) * factor, 2)
-
-
 def _lookup_district_pricing(category_id: int, location: str | None):
     """Return (CategoryPricing|None, canonical_district|None)."""
     district = match_district(location)
