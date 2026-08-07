@@ -9,7 +9,7 @@ from app.models.verification_otp_model import VerificationOtp
 from app.utils import utc_now
 
 from app.utils.cloudinary_client import upload_image
-from app.utils.otp_delivery import dev_expose_codes, send_identity_email_otp, send_identity_sms_otp
+from app.utils.otp_delivery import dev_expose_codes, send_identity_email_otp as deliver_email_otp, send_identity_sms_otp
 from app.utils.otp_utils import generate_otp_code, hash_otp_code, otp_expires_at, verify_otp_code
 
 logger = logging.getLogger(__name__)
@@ -301,7 +301,7 @@ def send_identity_email_otp(user_id):
 
     code = generate_otp_code()
     _store_otp(user_id, "identity_email", code)
-    send_identity_email_otp(user.email, code)
+    deliver_email_otp(user.email, code)
 
     payload = {"message": f"Verification code sent to {user.email}."}
     if dev_expose_codes():

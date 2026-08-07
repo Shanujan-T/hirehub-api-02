@@ -28,16 +28,21 @@ def send_identity_email_otp(email: str, code: str) -> None:
     mail_from = os.getenv("SMTP_FROM", smtp_user or "noreply@hirehub.local")
 
     if smtp_host and smtp_user and smtp_password:
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = mail_from
-        msg["To"] = email
-        msg.set_content(body)
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-        return
+        try:
+            logger.info("Attempting to send email via SMTP host %s:%s (from=%s)", smtp_host, smtp_port, mail_from)
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = mail_from
+            msg["To"] = email
+            msg.set_content(body)
+            with smtplib.SMTP(smtp_host, smtp_port) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+            logger.info("Email OTP successfully sent to %s via SMTP", email)
+            return
+        except Exception as exc:
+            logger.exception("SMTP email send failed: %s", exc)
 
     logger.info("Identity email OTP for %s: %s (configure SMTP_* to send real mail)", email, code)
 
