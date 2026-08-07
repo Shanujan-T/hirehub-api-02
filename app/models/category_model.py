@@ -21,17 +21,7 @@ class Category(db.Model):
     request_description = db.Column(db.Text, nullable=True)
     rejection_reason = db.Column(db.Text, nullable=True)
     baseline_price = db.Column(db.Numeric(12, 2), nullable=True)
-    # Legacy unit hint; live scaling is driven by scope_schema affects_price fields.
-    baseline_unit = db.Column(
-        db.Enum(
-            "per_job",
-            "per_sqft",
-            "per_word",
-            "per_hour",
-            name="category_baseline_unit",
-        ),
-        nullable=True,
-    )
+    baseline_scope_key = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
     pricing = db.relationship("CategoryPricing", back_populates="category", lazy="dynamic")
@@ -66,7 +56,7 @@ class Category(db.Model):
             "request_description": self.request_description,
             "rejection_reason": self.rejection_reason if self.status == "rejected" else None,
             "baseline_price": float(self.baseline_price) if self.baseline_price is not None else None,
-            "baseline_unit": self.baseline_unit,
+            "baseline_scope_key": self.baseline_scope_key,
             "pricing_unit": self.pricing_unit(),
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
