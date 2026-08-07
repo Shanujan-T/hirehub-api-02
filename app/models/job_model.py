@@ -42,9 +42,11 @@ class Job(db.Model):
         else:
             self.scope_data = json.dumps(value, ensure_ascii=False)
 
-    def to_dict(self, include_poster=False, strip_poster=False):
+    def to_dict(self, include_poster=False, strip_poster=False, application_count=None):
         scope_data = self.get_scope_data()
         schema = self.category.get_scope_schema() if self.category else None
+        if application_count is None:
+            application_count = self.applications.count()
         data = {
             "id": self.id,
             "category_id": self.category_id,
@@ -57,6 +59,7 @@ class Job(db.Model):
             "scope_data": scope_data,
             "scope_display": format_scope_display(schema, scope_data),
             "status": self.status,
+            "application_count": int(application_count or 0),
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
         if not strip_poster:
