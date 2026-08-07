@@ -207,6 +207,105 @@ def select_member(contract_id, application_id, user_id):
         return jsonify({"error": "Failed to select member."}), 500
 
 
+def select_members(contract_id, selections, user_id):
+    contract = Contract.query.get(contract_id)
+    if not contract:
+        return jsonify({"error": "Contract not found."}), 404
+    if not is_community_admin(user_id, contract.community_id):
+        return jsonify({"error": "Forbidden."}), 403
+    if contract.status != "open_internally":
+        return jsonify({"error": "Contract is not open for member selection."}), 400
+
+    if not selections:
+        return jsonify({"error": "At least one member selection is required."}), 400
+
+    selected_member_ids = []
+    selected_apps = []
+
+    for selection in selections:
+        app_id = selection.get("application_id")
+        member_id = selection.get("member_id")
+        payout_percent = selection.get("payout_percent")
+        payout_amount = selection.get("payout_amount")
+
+        if not app_id and not member_id:
+            return jsonify({"error": "Each selection must have an application_id or member_id."}), 400
+
+        actual_member_id = member_id
+        if app_id:
+            app = ContractApplication.query.get(app_id)
+            if not app or app.contract_id != contract_id:
+                return jsonify({"error": f"Contract application {app_id} not found."}), 404
+            actual_member_id = app.member_id
+
+        if not actual_member_id:
+            return jsonify({"error": "Could not determine member ID for selection."}), 400
+
+        community_member = CommunityMember.query.filter_by(
+            community_id=contract.community_id,
+            user_id=actual_member_id,
+            status="approved"
+        ).first()
+        if not community_member:
+            return jsonify({"error": f"Member {actual_member_id} is not an approved member of this community."}), 400
+
+        application = None
+        if app_id:
+            application = ContractApplication.query.get(app_id)
+        else:
+            application = ContractApplication.query.filter_by(
+                contract_id=contract_id,
+                member_id=actual_member_id
+            ).first()
+
+        if application:
+            if actual_member_id in selected_member_ids:
+                return jsonify({"error": f"Member {actual_member_id} is selected multiple times."}), 400
+            
+            application.status = "selected"
+            application.payout_percent = payout_percent
+            application.payout_amount = payout_amount
+            if not app_id:
+                application.origin = "direct_assign"
+        else:
+            application = ContractApplication(
+                contract_id=contract_id,
+                member_id=actual_member_id,
+                status="selected",
+                origin="direct_assign",
+                payout_percent=payout_percent,
+                payout_amount=payout_amount,
+                note=None
+            )
+            db.session.add(application)
+
+        selected_member_ids.append(actual_member_id)
+        selected_apps.append(application)
+
+    contract.assigned_member_id = selected_member_ids[0]
+    contract.status = "active"
+
+    others = ContractApplication.query.filter(
+        ContractApplication.contract_id == contract_id,
+        ~ContractApplication.member_id.in_(selected_member_ids)
+    ).all()
+    for other in others:
+        other.status = "rejected"
+
+    try:
+        db.session.commit()
+        job = Job.query.get(contract.job_id)
+        job_title = job.title if job else "the contract"
+        for app in selected_apps:
+            notify_contract_assigned(app.member_id, job_title, contract.id)
+        for other in others:
+            notify_contract_application_rejected(other.member_id, job_title, contract.id)
+        return jsonify({"message": "Members selected.", "contract": contract.to_dict(include_job=True)}), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Failed to select members."}), 500
+
+
 def submit_deliverable(contract_id, user_id, data):
     contract = Contract.query.get(contract_id)
     if not contract:
