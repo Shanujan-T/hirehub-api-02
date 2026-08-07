@@ -16,8 +16,6 @@ from app.utils.pricing_utils import (
 )
 from app.utils.scope_utils import normalize_scope_schema
 
-_ALLOWED_BASELINE_UNITS = ("per_job", "per_sqft", "per_word", "per_hour")
-
 
 def _find_by_name_ci(name: str):
     return Category.query.filter(func.lower(Category.name) == name.strip().lower()).first()
@@ -34,19 +32,40 @@ def _optional_admin_user():
     return None
 
 
-def _validate_category_payload(data, *, require_name=True):
+def _validate_category_payload(data, *, require_name=True, cat=None):
     errors = []
     if require_name and not data.get("name"):
         errors.append("name is required.")
     # scope_fields is an accepted alias for scope_schema
+    incoming_schema = None
     if "scope_schema" in data or "scope_fields" in data:
         raw_schema = data.get("scope_schema", data.get("scope_fields"))
-        _, schema_errors = normalize_scope_schema(raw_schema)
+        normalized, schema_errors = normalize_scope_schema(raw_schema)
         errors.extend(schema_errors)
-    if "baseline_unit" in data and data.get("baseline_unit") not in (None, "", *_ALLOWED_BASELINE_UNITS):
-        errors.append(
-            "baseline_unit must be per_job, per_sqft, per_word, or per_hour."
-        )
+        incoming_schema = normalized
+
+    key_to_check = None
+    if "baseline_scope_key" in data:
+        key_to_check = data.get("baseline_scope_key")
+    elif cat is not None and cat.baseline_scope_key:
+        if "scope_schema" in data or "scope_fields" in data:
+            key_to_check = cat.baseline_scope_key
+
+    if key_to_check not in (None, ""):
+        key = str(key_to_check).strip()
+        if incoming_schema is not None:
+            schema = incoming_schema
+        elif cat is not None:
+            schema = cat.get_scope_schema() or []
+        else:
+            schema = []
+        
+        field = next((f for f in schema if isinstance(f, dict) and f.get("key") == key), None)
+        if not field:
+            errors.append(f"baseline_scope_key '{key}' does not exist in the category's scope schema.")
+        elif field.get("type") != "number":
+            errors.append(f"baseline_scope_key '{key}' must refer to a numeric field.")
+
     if "baseline_price" in data and data.get("baseline_price") not in (None, ""):
         try:
             price = float(data["baseline_price"])
@@ -67,7 +86,7 @@ def _scope_payload(data: dict):
 
 
 def _apply_baseline_fields(cat: Category, data: dict) -> bool:
-    """Apply baseline fields. Returns True if baseline_price changed."""
+    """Apply baseline fields. Returns True if baseline_price or baseline_scope_key changed."""
     baseline_changed = False
     if "baseline_price" in data:
         raw = data.get("baseline_price")
@@ -76,9 +95,12 @@ def _apply_baseline_fields(cat: Category, data: dict) -> bool:
         if new_price != old:
             baseline_changed = True
         cat.baseline_price = new_price
-    if "baseline_unit" in data:
-        unit = data.get("baseline_unit")
-        cat.baseline_unit = unit if unit in _ALLOWED_BASELINE_UNITS else None
+    if "baseline_scope_key" in data:
+        raw_key = data.get("baseline_scope_key")
+        new_key = None if raw_key in (None, "") else str(raw_key).strip()
+        if new_key != cat.baseline_scope_key:
+            baseline_changed = True
+        cat.baseline_scope_key = new_key
     return baseline_changed
 
 def create_category(data):
@@ -213,7 +235,7 @@ def update_category(category_id, data):
     cat = Category.query.get(category_id)
     if not cat:
         return jsonify({"error": "Category not found."}), 404
-    errors = _validate_category_payload(data, require_name=False)
+    errors = _validate_category_payload(data, require_name=False, cat=cat)
     if errors:
         return jsonify({"errors": errors}), 400
     if "name" in data:
