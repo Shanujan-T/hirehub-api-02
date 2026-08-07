@@ -42,6 +42,7 @@ MIGRATION_MODULES = [
     "migrations.023_district_pricing_seed",
     "migrations.024_scope_fields_affects_price",
     "migrations.025_contract_application_origin_and_payout",
+    "migrations.026_category_baseline_scope_key",
 ]
 
 
