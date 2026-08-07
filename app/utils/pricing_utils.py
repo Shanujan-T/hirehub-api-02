@@ -137,14 +137,18 @@ def _float_or_none(value) -> float | None:
 # ---------------------------------------------------------------------------
 # Generic scope-based scaling (driven by category.scope_schema / scope_fields).
 # Never hardcode field names like word_count / area_sqft here.
-#
-# For each numeric field with affects_price=true:
-#   ratio = submitted_value / unit_size
-# If MULTIPLE such fields have values, ratios are MULTIPLIED together
-# (independent scope dimensions, e.g. area × rooms). Fields without a
-# submitted value are skipped so the UI can show the per-unit reference rate
-# before the poster fills everything in.
 # ---------------------------------------------------------------------------
+
+
+def scale_price(base_rate: float, scope_data: dict, scope_key: str | None) -> float:
+    if scope_key and scope_data:
+        try:
+            val = float(scope_data.get(scope_key))
+            if val > 0:
+                return base_rate * val
+        except (TypeError, ValueError):
+            pass
+    return base_rate
 
 
 def _schema_for(category: Category | None, scope_schema=None) -> list:
@@ -157,75 +161,38 @@ def _schema_for(category: Category | None, scope_schema=None) -> list:
     return []
 
 
-def _scope_scale_factor(schema: list, scope_data: dict) -> tuple[float, list[dict]]:
-    """Return (scale_factor, used_fields) from affects_price number fields."""
-    fields = pricing_fields(schema)
-    if not fields:
-        return 1.0, []
-
-    factor = 1.0
-    used: list[dict] = []
-    for field in fields:
-        key = field.get("key")
-        if not key:
-            continue
-        value = _float_or_none(scope_data.get(key))
-        if value is None or value <= 0:
-            continue
-        try:
-            unit_size = float(field.get("unit_size") or 1)
-        except (TypeError, ValueError):
-            unit_size = 1.0
-        if unit_size <= 0:
-            unit_size = 1.0
-        factor *= value / unit_size
-        used.append(field)
-
-    if not used:
-        return 1.0, []
-    return factor, used
-
-
 def _unit_scope_provided(category: Category | None, scope_data: dict, schema=None) -> bool:
-    """True when at least one affects_price numeric scope value was supplied."""
-    schema = _schema_for(category, schema)
-    _, used = _scope_scale_factor(schema, scope_data or {})
-    return bool(used)
+    """True when baseline_scope_key numeric scope value was supplied."""
+    if not category or not category.baseline_scope_key:
+        return False
+    val = _float_or_none(scope_data.get(category.baseline_scope_key))
+    return val is not None and val > 0
 
 
 def _baseline_estimate(category: Category | None, scope_data: dict, schema=None) -> float | None:
-    """Scale category.baseline_price by generic scope field ratios when present."""
+    """Scale category.baseline_price by baseline_scope_key key when present."""
     if not category or category.baseline_price is None:
         return None
     baseline = float(category.baseline_price)
-    schema = _schema_for(category, schema)
-    factor, _used = _scope_scale_factor(schema, scope_data or {})
-    return round(baseline * factor, 2)
+    return round(scale_price(baseline, scope_data, category.baseline_scope_key), 2)
 
 
 def _scale_reference_price(
     reference: float, category: Category | None, scope_data: dict, schema=None
 ) -> float:
-    """Apply generic scope scaling to a district/base reference price."""
-    schema = _schema_for(category, schema)
-    factor, _used = _scope_scale_factor(schema, scope_data or {})
-    return round(float(reference) * factor, 2)
+    """Apply baseline_scope_key scaling to a district/base reference price."""
+    scope_key = category.baseline_scope_key if category else None
+    return round(scale_price(float(reference), scope_data, scope_key), 2)
 
 
 def _baseline_note(category: Category | None, scope_data: dict | None = None, schema=None) -> str:
-    schema = _schema_for(category, schema)
-    fields = pricing_fields(schema)
-    if not fields:
+    if not category or not category.baseline_scope_key:
         return "Estimated (no local data yet)"
-    _, used = _scope_scale_factor(schema, scope_data or {})
-    phrases = [format_unit_phrase(f) for f in (used or fields)]
-    seen: set[str] = set()
-    unique: list[str] = []
-    for phrase in phrases:
-        if phrase not in seen:
-            seen.add(phrase)
-            unique.append(phrase)
-    return f"Estimated from category baseline ({', '.join(unique)})"
+    schema = _schema_for(category, schema)
+    field = next((f for f in schema if isinstance(f, dict) and f.get("key") == category.baseline_scope_key), None)
+    if field:
+        return f"Estimated from category baseline ({format_unit_phrase(field)})"
+    return "Estimated (no local data yet)"
 
 
 def _completed_jobs_with_amounts(category_id: int, location: str) -> list[tuple[Job, float]]:
@@ -271,25 +238,6 @@ def _posted_jobs_with_prices(
             continue
         out.append((job, price))
     return out
-
-
-def _numeric_price_per_unit(
-    history: list[tuple[Job, float]], field_key: str, current_value: float
-) -> tuple[float | None, int]:
-    ppus: list[float] = []
-    for job, amount in history:
-        data = job.get_scope_data() or {}
-        raw = data.get(field_key)
-        try:
-            units = float(raw)
-        except (TypeError, ValueError):
-            continue
-        if units <= 0:
-            continue
-        ppus.append(amount / units)
-    if len(ppus) < MIN_SAMPLES or current_value <= 0:
-        return None, len(ppus)
-    return round(mean(ppus) * current_value, 2), len(ppus)
 
 
 def _multiselect_delta(
@@ -344,6 +292,7 @@ def _apply_scope_to_history(
     history: list[tuple[Job, float]],
     schema: list,
     scope_data: dict,
+    scope_key: str | None,
     *,
     flat_method: str,
     allow_multiselect: bool,
@@ -374,37 +323,32 @@ def _apply_scope_to_history(
         )
 
     if schema and scope_data:
-        # Prefer affects_price number fields; fall back to any number field for
-        # historical price-per-unit adjustment (legacy schemas without the flag).
-        preferred = pricing_fields(schema)
-        number_fields = preferred or [
-            f for f in schema if isinstance(f, dict) and f.get("type") == "number"
-        ]
-        for field in number_fields:
-            key = field.get("key")
-            if not key or key not in scope_data:
-                continue
-            try:
-                current = float(scope_data[key])
-            except (TypeError, ValueError):
-                continue
-            estimate, n = _numeric_price_per_unit(history, key, current)
-            if estimate is not None:
-                suggested = estimate
-                sample_size = max(sample_size, n)
-                used_scope = True
-                unit_bit = f" ({format_unit_phrase(field)})"
-                if flat_method == "historical_average":
-                    note = (
-                        f"Based on {sample_size} completed jobs in this area "
-                        f"(size-adjusted{unit_bit})."
-                    )
-                else:
-                    note = (
-                        f"Based on {sample_size} similar job postings "
-                        f"(asking prices, size-adjusted{unit_bit})."
-                    )
-                break
+        if scope_key and scope_data:
+            field = next((f for f in schema if isinstance(f, dict) and f.get("key") == scope_key), None)
+            if field and field.get("type") == "number":
+                ppus: list[float] = []
+                for job, amount in history:
+                    job_val = _float_or_none((job.get_scope_data() or {}).get(scope_key))
+                    if job_val and job_val > 0:
+                        ppus.append(amount / job_val)
+                if len(ppus) >= MIN_SAMPLES:
+                    current_val = _float_or_none(scope_data.get(scope_key))
+                    if current_val and current_val > 0:
+                        avg_ppu = mean(ppus)
+                        suggested = round(scale_price(avg_ppu, scope_data, scope_key), 2)
+                        sample_size = len(ppus)
+                        used_scope = True
+                        unit_bit = f" ({format_unit_phrase(field)})"
+                        if flat_method == "historical_average":
+                            note = (
+                                f"Based on {sample_size} completed jobs in this area "
+                                f"(size-adjusted{unit_bit})."
+                            )
+                        else:
+                            note = (
+                                f"Based on {sample_size} similar job postings "
+                                f"(asking prices, size-adjusted{unit_bit})."
+                            )
 
         if allow_multiselect:
             for field in schema:
@@ -429,7 +373,6 @@ def _apply_scope_to_history(
                         "(feature-adjusted)."
                     )
 
-    # Tier 1 keeps scope_adjusted when refined; Tier 2 always reports posted_jobs_average.
     if used_scope and flat_method == "historical_average":
         method = "scope_adjusted"
     else:
@@ -471,6 +414,7 @@ def get_pricing_suggestion(
     if not isinstance(schema, list):
         schema = []
 
+    scope_key = category.baseline_scope_key if category else None
     pricing_row, district = _lookup_district_pricing(category_id, location)
 
     # --- District table: real accumulated data ---
@@ -482,9 +426,12 @@ def get_pricing_suggestion(
             f"Estimated from local completed contracts"
             + (f" in {district}" if district else "")
         )
-        _, used = _scope_scale_factor(schema, scope_data)
-        if used:
-            note = f"{note} ({', '.join(format_unit_phrase(f) for f in used)})"
+        if category and category.baseline_scope_key:
+            val = _float_or_none(scope_data.get(category.baseline_scope_key))
+            if val is not None and val > 0:
+                field = next((f for f in schema if isinstance(f, dict) and f.get("key") == category.baseline_scope_key), None)
+                if field:
+                    note = f"{note} ({format_unit_phrase(field)})"
         return _result(
             scaled,
             int(pricing_row.sample_size),
@@ -499,6 +446,7 @@ def get_pricing_suggestion(
         completed,
         schema,
         scope_data,
+        scope_key,
         flat_method="historical_average",
         allow_multiselect=True,
     )
@@ -527,6 +475,7 @@ def get_pricing_suggestion(
         posted,
         schema,
         scope_data,
+        scope_key,
         flat_method="posted_jobs_average",
         allow_multiselect=False,
     )
@@ -555,12 +504,15 @@ def get_pricing_suggestion(
             float(pricing_row.average_price), category, scope_data, schema
         )
         note = "Estimated (regional baseline — no completed contracts yet)"
-        _, used = _scope_scale_factor(schema, scope_data)
-        if used:
-            note = (
-                f"Estimated (regional baseline — no completed contracts yet; "
-                f"{', '.join(format_unit_phrase(f) for f in used)})"
-            )
+        if category and category.baseline_scope_key:
+            val = _float_or_none(scope_data.get(category.baseline_scope_key))
+            if val is not None and val > 0:
+                field = next((f for f in schema if isinstance(f, dict) and f.get("key") == category.baseline_scope_key), None)
+                if field:
+                    note = (
+                        f"Estimated (regional baseline — no completed contracts yet; "
+                        f"{format_unit_phrase(field)})"
+                    )
         return _result(
             scaled,
             0,
@@ -573,7 +525,7 @@ def get_pricing_suggestion(
     baseline = _baseline_estimate(category, scope_data, schema)
     if baseline is not None:
         note = _baseline_note(category, scope_data, schema)
-        if not pricing_fields(schema):
+        if not category or not category.baseline_scope_key:
             note = "Estimated (no local data yet)"
         return _result(
             baseline,
