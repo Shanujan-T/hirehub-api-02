@@ -48,6 +48,15 @@ def select_member(contract_id):
     )
 
 
+@contracts_bp.route("/<int:contract_id>/select-members", methods=["POST"])
+@jwt_required()
+def select_members(contract_id):
+    data = request.get_json() or {}
+    return contract_controller.select_members(
+        contract_id, data.get("selections", []), get_jwt_identity()
+    )
+
+
 @contracts_bp.route("/<int:contract_id>/submit-deliverable", methods=["POST"])
 @jwt_required()
 def submit_deliverable(contract_id):
