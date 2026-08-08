@@ -29,7 +29,8 @@ def request_category():
 @categories_bp.route("/<int:category_id>/pricing-suggestion", methods=["GET"])
 def pricing_suggestion(category_id):
     location = request.args.get("location", "")
-    return category_controller.pricing_suggestion(category_id, location)
+    deadline = request.args.get("deadline", "")
+    return category_controller.pricing_suggestion(category_id, location, deadline=deadline)
 
 
 @categories_bp.route("/<int:category_id>/seed-pricing", methods=["POST"])
