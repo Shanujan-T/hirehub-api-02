@@ -45,6 +45,8 @@ MIGRATION_MODULES = [
     "migrations.026_category_baseline_scope_key",
     "migrations.027_pricing_reference",
     "migrations.028_pricing_reference_district_prices",
+    "migrations.029_align_csv_pricing_scopes",
+    "migrations.030_photography_event_time",
 ]
 
 
