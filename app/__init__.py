@@ -2,6 +2,10 @@ import logging
 import re
 from collections import defaultdict
 
+# MUST be first, before any other imports
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, jsonify
 from flask_cors import CORS
 from sqlalchemy.exc import OperationalError, ProgrammingError
@@ -323,3 +327,4 @@ def create_app():
         return _build_endpoint_index(app)
 
     return app
+
