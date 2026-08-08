@@ -26,6 +26,17 @@ def generate_job_description():
     )
 
 
+@jobs_bp.route("/suggested-price", methods=["GET"])
+@jwt_required()
+def suggested_price():
+    category = request.args.get("category", "")
+    scope = request.args.get("scope", "")
+    quantity = request.args.get("quantity")
+    district = request.args.get("district", "")
+    return job_controller.get_suggested_price(category, scope, quantity, district)
+
+
+
 @jobs_bp.route("/<int:job_id>", methods=["GET"])
 @jwt_required()
 def get_job(job_id):
