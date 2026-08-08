@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 
 from flask import jsonify
@@ -11,6 +12,8 @@ from app.utils import utc_now
 from app.utils.cloudinary_client import upload_image
 from app.utils.otp_delivery import dev_expose_codes, send_identity_email_otp as deliver_email_otp, send_identity_sms_otp
 from app.utils.otp_utils import generate_otp_code, hash_otp_code, otp_expires_at, verify_otp_code
+from app.utils.sms_client import is_twilio_configured, send_verification_code, check_verification_code
+from app.utils.email_client import send_otp_email
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +254,16 @@ def send_identity_phone_otp(user_id, data):
     if not phone:
         return jsonify({"errors": ["phone_number is invalid."]}), 400
 
+    if is_twilio_configured():
+        try:
+            send_verification_code(phone)
+            user.phone_number = phone
+            db.session.commit()
+            return jsonify({"message": "Verification code sent via SMS."}), 200
+        except Exception as e:
+            logger.exception("Twilio Verify send failed: %s", e)
+            return jsonify({"error": "Couldn't send code, please check the number and try again."}), 400
+
     code = generate_otp_code()
     _store_otp(user_id, "identity_phone", code)
     user.phone_number = phone
@@ -278,8 +291,20 @@ def confirm_identity_phone_otp(user_id, data):
     code = str(data.get("code", "")).strip()
     if not code:
         return jsonify({"errors": ["code is required."]}), 400
-    if not _consume_otp(user_id, "identity_phone", code):
-        return jsonify({"error": "Invalid or expired verification code."}), 400
+
+    if is_twilio_configured():
+        if not user.phone_number:
+            return jsonify({"error": "No phone number associated with this request. Please send a code first."}), 400
+        try:
+            approved = check_verification_code(user.phone_number, code)
+            if not approved:
+                return jsonify({"error": "Invalid or expired verification code."}), 400
+        except Exception as e:
+            logger.exception("Twilio Verify check failed: %s", e)
+            return jsonify({"error": "Failed to confirm phone verification, please try again."}), 400
+    else:
+        if not _consume_otp(user_id, "identity_phone", code):
+            return jsonify({"error": "Invalid or expired verification code."}), 400
 
     user.phone_verified_at = utc_now()
     user.sync_identity_verification_status()
@@ -301,7 +326,18 @@ def send_identity_email_otp(user_id):
 
     code = generate_otp_code()
     _store_otp(user_id, "identity_email", code)
-    deliver_email_otp(user.email, code)
+
+    if os.getenv("RESEND_API_KEY"):
+        try:
+            send_otp_email(user.email, code)
+        except Exception as e:
+            logger.exception("Failed to send identity email OTP: %s", e)
+            db.session.rollback()
+            error_msg = f"Email delivery failed: {str(e).rstrip('.')}. Please check setup."
+            return jsonify({"error": error_msg}), 400
+    else:
+        logger.info("Identity email OTP for %s: %s (configure RESEND_API_KEY to send real email)", user.email, code)
+
 
     payload = {"message": f"Verification code sent to {user.email}."}
     if dev_expose_codes():
