@@ -68,4 +68,3 @@ websockets==16.1.1
 Werkzeug==3.1.8
 wrapt==2.2.2
 twilio
-resend

@@ -327,7 +327,7 @@ def send_identity_email_otp(user_id):
     code = generate_otp_code()
     _store_otp(user_id, "identity_email", code)
 
-    if os.getenv("RESEND_API_KEY"):
+    if os.getenv("BREVO_API_KEY"):
         try:
             send_otp_email(user.email, code)
         except Exception as e:
@@ -336,7 +336,7 @@ def send_identity_email_otp(user_id):
             error_msg = f"Email delivery failed: {str(e).rstrip('.')}. Please check setup."
             return jsonify({"error": error_msg}), 400
     else:
-        logger.info("Identity email OTP for %s: %s (configure RESEND_API_KEY to send real email)", user.email, code)
+        logger.info("Identity email OTP for %s: %s (configure BREVO_API_KEY to send real email)", user.email, code)
 
 
     payload = {"message": f"Verification code sent to {user.email}."}
