@@ -15,6 +15,9 @@ class Job(db.Model):
     description = db.Column(db.Text, nullable=False)
     location = db.Column(db.String(255), nullable=False)
     deadline = db.Column(db.Date, nullable=False)
+    # Photography jobs use deadline as the event date and retain this separate
+    # local event time without changing delivery-deadline behavior elsewhere.
+    event_time = db.Column(db.Time, nullable=True)
     suggested_price = db.Column(db.Numeric(10, 2), nullable=True)
     final_price = db.Column(db.Numeric(10, 2), nullable=False)
     scope_data = db.Column(db.Text, nullable=True)
@@ -54,6 +57,7 @@ class Job(db.Model):
             "description": self.description,
             "location": self.location,
             "deadline": self.deadline.isoformat() if self.deadline else None,
+            "event_time": self.event_time.strftime("%H:%M") if self.event_time else None,
             "suggested_price": float(self.suggested_price) if self.suggested_price else None,
             "final_price": float(self.final_price) if self.final_price else 0,
             "scope_data": scope_data,
