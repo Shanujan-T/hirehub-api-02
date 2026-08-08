@@ -51,6 +51,14 @@ def create_job():
     except ValueError:
         return jsonify({"error": "Invalid deadline format. Use YYYY-MM-DD."}), 400
 
+    event_time = None
+    if category.name.strip().lower() == "photography":
+        event_time_value = str(data.get("event_time") or "").strip()
+        try:
+            event_time = datetime.strptime(event_time_value, "%H:%M").time()
+        except ValueError:
+            return jsonify({"error": "Photography jobs require a valid event time (HH:MM)."}), 400
+
     scope_data, scope_errors = validate_scope_data(
         category.get_scope_schema(), data.get("scope_data")
     )
@@ -64,6 +72,7 @@ def create_job():
         description=data["description"],
         location=title_case_words(data["location"]),
         deadline=deadline,
+        event_time=event_time,
         suggested_price=data.get("suggested_price"),
         final_price=data["final_price"],
         status="open",
@@ -155,6 +164,15 @@ def update_job(job_id):
             job.deadline = datetime.strptime(data["deadline"], "%Y-%m-%d").date()
         except ValueError:
             return jsonify({"error": "Invalid deadline format."}), 400
+    if "event_time" in data:
+        event_time_value = str(data["event_time"] or "").strip()
+        if not event_time_value:
+            job.event_time = None
+        else:
+            try:
+                job.event_time = datetime.strptime(event_time_value, "%H:%M").time()
+            except ValueError:
+                return jsonify({"error": "Invalid event time format. Use HH:MM."}), 400
     if "category_id" in data:
         category = Category.query.get(data["category_id"])
         if not category or category.status != "approved":
@@ -221,4 +239,3 @@ def get_suggested_price(category, scope, quantity, district):
 
     price = suggest_price(category, qty, district, scope)
     return jsonify({"suggestedPrice": price}), 200
-
