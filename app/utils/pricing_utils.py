@@ -10,6 +10,7 @@ from app.models.category_model import Category
 from app.models.category_pricing_model import CategoryPricing
 from app.models.contract_model import Contract
 from app.models.job_model import Job
+from app.models.pricing_reference_model import PricingReference
 from app.utils import utc_now
 from app.utils.scope_utils import (
     format_unit_phrase,
@@ -24,6 +25,7 @@ from app.utils.sri_lanka_districts import (
 
 # Minimum samples before a data-backed tier is used.
 MIN_SAMPLES = 3
+_TEST_DATA_MARKERS = ("test", "dummy", "sample", "demo", "fake", "lorem ipsum")
 
 
 def recalc_category_pricing(category_id, location):
@@ -210,11 +212,122 @@ def _completed_jobs_with_amounts(category_id: int, location: str) -> list[tuple[
     )
     out: list[tuple[Job, float]] = []
     for job, amount in rows:
+        if _is_test_or_dummy_job(job):
+            continue
         try:
             out.append((job, float(amount)))
         except (TypeError, ValueError):
             continue
     return out
+
+
+def _is_test_or_dummy_job(job: Job) -> bool:
+    """Keep explicitly non-production jobs out of pricing samples."""
+    text = f"{job.title or ''} {job.description or ''}".lower()
+    return any(marker in text for marker in _TEST_DATA_MARKERS)
+
+
+def _missing_required_scope_fields(schema: list, scope_data: dict) -> list[str]:
+    missing = []
+    for field in schema:
+        if not isinstance(field, dict) or not field.get("required", True):
+            continue
+        value = scope_data.get(field.get("key"))
+        if value is None or value == "" or value == []:
+            missing.append(str(field.get("label") or field.get("key")))
+    return missing
+
+
+def _round_lkr(value: float) -> float:
+    return round(value / 50.0) * 50.0
+
+
+def _reference_price(row: PricingReference, district: str | None) -> float:
+    prices = row.get_district_prices()
+    if district and prices.get(district) is not None:
+        return float(prices[district])
+    return float(row.base_price)
+
+
+def _dataset_suggestion(category: Category, location: str, scope_data: dict, schema: list) -> dict | None:
+    """Use the imported CSV as the primary, scope-aware price reference."""
+    rows = (
+        PricingReference.query.filter(func.lower(PricingReference.category) == category.name.lower())
+        .order_by(PricingReference.quantity.asc())
+        .all()
+    )
+    if not rows:
+        return None
+
+    district = match_district(location)
+    numeric_field = next(
+        (field for field in schema if isinstance(field, dict) and field.get("key") == category.baseline_scope_key and field.get("type") == "number"),
+        None,
+    ) or next((field for field in schema if isinstance(field, dict) and field.get("type") == "number"), None)
+
+    if numeric_field:
+        requested = _float_or_none(scope_data.get(numeric_field.get("key")))
+        if not requested or requested <= 0:
+            return None
+        unit = str(numeric_field.get("unit") or "").strip().lower()
+        tier_rows = [row for row in rows if not unit or row.unit.strip().lower() == unit] or rows
+        tier_rows = sorted(tier_rows, key=lambda row: row.quantity)
+        exact = next((row for row in tier_rows if row.quantity == requested), None)
+        if exact:
+            price = _round_lkr(_reference_price(exact, district))
+            return _result(price, 0, "dataset_reference", f"CSV reference: {exact.scope} in {district or location}.", is_seeded_estimate=True)
+
+        lower = max((row for row in tier_rows if row.quantity < requested), key=lambda row: row.quantity, default=None)
+        upper = min((row for row in tier_rows if row.quantity > requested), key=lambda row: row.quantity, default=None)
+        if lower and upper:
+            lower_price = _reference_price(lower, district)
+            upper_price = _reference_price(upper, district)
+            fraction = (requested - lower.quantity) / (upper.quantity - lower.quantity)
+            price = _round_lkr(lower_price + fraction * (upper_price - lower_price))
+            result = _result(price, 0, "dataset_interpolated_range", f"CSV reference interpolated between {lower.scope} and {upper.scope} in {district or location}.", is_seeded_estimate=True)
+            result["suggested_price_low"] = _round_lkr(min(lower_price, upper_price))
+            result["suggested_price_high"] = _round_lkr(max(lower_price, upper_price))
+            return result
+
+        # Do not scale a short request down below the dataset's smallest valid scope tier.
+        nearest = tier_rows[0] if requested < tier_rows[0].quantity else tier_rows[-1]
+        price = _round_lkr(_reference_price(nearest, district))
+        return _result(price, 0, "dataset_reference", f"CSV reference: nearest scope tier {nearest.scope} in {district or location}.", is_seeded_estimate=True)
+
+    selected_text = " ".join(str(value) for value in scope_data.values() if isinstance(value, str)).strip().lower()
+    chosen = next((row for row in rows if selected_text and (selected_text in row.scope.lower() or row.scope.lower() in selected_text)), rows[0])
+    price = _round_lkr(_reference_price(chosen, district))
+    return _result(price, 0, "dataset_reference", f"CSV reference: {chosen.scope} in {district or location}.", is_seeded_estimate=True)
+
+
+def _blend_valid_completed_history(reference: dict, category_id: int, location: str, scope_data: dict, scope_key: str | None) -> dict:
+    """Apply a deliberately small secondary adjustment from valid completed contracts."""
+    history = _completed_jobs_with_amounts(category_id, location)
+    if len(history) < MIN_SAMPLES or not reference.get("suggested_price"):
+        return reference
+
+    requested_qty = _float_or_none(scope_data.get(scope_key)) if scope_key else None
+    comparable = []
+    for job, amount in history:
+        job_qty = _float_or_none((job.get_scope_data() or {}).get(scope_key)) if scope_key else None
+        if requested_qty and job_qty and job_qty > 0:
+            comparable.append(amount / job_qty * requested_qty)
+        elif not requested_qty:
+            comparable.append(amount)
+    if len(comparable) < MIN_SAMPLES:
+        return reference
+
+    dataset_price = float(reference["suggested_price"])
+    blended = _round_lkr(dataset_price * 0.85 + mean(comparable) * 0.15)
+    factor = blended / dataset_price if dataset_price else 1.0
+    reference["suggested_price"] = blended
+    reference["average_price"] = blended
+    reference["sample_size"] = len(comparable)
+    reference["note"] += f" Gently adjusted using {len(comparable)} valid completed contracts."
+    for key in ("suggested_price_low", "suggested_price_high"):
+        if key in reference:
+            reference[key] = _round_lkr(float(reference[key]) * factor)
+    return reference
 
 
 def _posted_jobs_with_prices(
@@ -415,6 +528,23 @@ def get_pricing_suggestion(
         schema = []
 
     scope_key = category.baseline_scope_key if category else None
+
+    if category:
+        missing_scope = _missing_required_scope_fields(schema, scope_data)
+        if missing_scope:
+            return _result(
+                None,
+                0,
+                "scope_required",
+                "Select job scope to see a price suggestion: " + ", ".join(missing_scope) + ".",
+            )
+
+        dataset = _dataset_suggestion(category, location, scope_data, schema)
+        if dataset is not None:
+            return _blend_valid_completed_history(
+                dataset, category.id, location, scope_data, scope_key
+            )
+
     pricing_row, district = _lookup_district_pricing(category_id, location)
 
     # --- District table: real accumulated data ---
