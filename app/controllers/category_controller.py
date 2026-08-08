@@ -1,4 +1,5 @@
 import json
+import logging
 
 from flask import jsonify, request
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
@@ -15,6 +16,8 @@ from app.utils.pricing_utils import (
     seed_district_pricing,
 )
 from app.utils.scope_utils import normalize_scope_schema
+
+logger = logging.getLogger(__name__)
 
 
 def _find_by_name_ci(name: str):
@@ -338,7 +341,7 @@ def delete_category(category_id):
         return jsonify({"error": "Failed to delete category."}), 500
 
 
-def pricing_suggestion(category_id, location, scope_data=None):
+def pricing_suggestion(category_id, location, scope_data=None, deadline=None):
     cat = Category.query.get(category_id)
     if not cat or cat.status != "approved":
         return jsonify({"error": "Category not found."}), 404
@@ -350,13 +353,20 @@ def pricing_suggestion(category_id, location, scope_data=None):
             try:
                 scope_data = json.loads(raw)
             except json.JSONDecodeError:
+                logger.exception("[suggested-price] could not parse scope query data: %r", raw)
                 scope_data = None
+
+    logger.info(
+        "[suggested-price] request received category_id=%s location=%r deadline=%r scope_data=%s",
+        category_id, location, deadline, scope_data,
+    )
 
     result = get_pricing_suggestion(
         category_id,
         location,
         scope_data=scope_data,
         scope_schema=cat.get_scope_schema(),
+        deadline=deadline,
     )
     return jsonify(result), 200
 
