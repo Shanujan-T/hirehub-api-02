@@ -542,3 +542,110 @@ def get_pricing_suggestion(
         "No pricing data for this category + location yet.",
         is_seeded_estimate=False,
     )
+
+
+def suggest_price(category: str, quantity: float | int, district: str, scope: str | None = None) -> int | None:
+    from app.models.pricing_reference_model import PricingReference
+    from sqlalchemy import func
+
+    # 1. Fetch all PricingReference rows for category, sorted by quantity
+    rows = (
+        PricingReference.query.filter(func.lower(PricingReference.category) == func.lower(category))
+        .order_by(PricingReference.quantity.asc())
+        .all()
+    )
+    if not rows:
+        return None
+
+    requested_qty = quantity
+    try:
+        requested_qty = float(quantity)
+        if requested_qty.is_integer():
+            requested_qty = int(requested_qty)
+    except (TypeError, ValueError):
+        requested_qty = 1
+
+    # 2. Check if a row's quantity exactly matches requested quantity
+    exact_match = next((r for r in rows if r.quantity == requested_qty), None)
+    
+    is_quantity_scaled = len([r for r in rows if r.quantity > 1]) > 1
+
+    base_price = None
+
+    if is_quantity_scaled:
+        if exact_match:
+            base_price = float(exact_match.base_price)
+        elif requested_qty > rows[-1].quantity:
+            # Extrapolate using highest tier's rate
+            highest_tier = rows[-1]
+            rate = float(highest_tier.base_price) / highest_tier.quantity
+            base_price = rate * requested_qty
+        elif requested_qty < rows[0].quantity:
+            # Below lowest tier: extrapolate using lowest tier's rate
+            lowest_tier = rows[0]
+            rate = float(lowest_tier.base_price) / lowest_tier.quantity
+            base_price = rate * requested_qty
+        else:
+            # Interpolate
+            lower_tier = max((r for r in rows if r.quantity < requested_qty), key=lambda r: r.quantity)
+            upper_tier = min((r for r in rows if r.quantity > requested_qty), key=lambda r: r.quantity)
+            rate_lower = float(lower_tier.base_price) / lower_tier.quantity
+            rate_upper = float(upper_tier.base_price) / upper_tier.quantity
+            
+            # Linear interpolation of per-unit rate
+            t = (requested_qty - lower_tier.quantity) / (upper_tier.quantity - lower_tier.quantity)
+            rate = rate_lower + t * (rate_upper - rate_lower)
+            base_price = rate * requested_qty
+    else:
+        # Flat one-off category
+        matched_row = None
+        cleaned_req_scope = str(scope or "").strip().lower()
+        if cleaned_req_scope:
+            # 1. Try exact match first
+            matched_row = next((r for r in rows if r.scope.strip().lower() == cleaned_req_scope), None)
+            # 2. Try substring match
+            if not matched_row:
+                matched_row = next(
+                    (r for r in rows if cleaned_req_scope in r.scope.strip().lower() or r.scope.strip().lower() in cleaned_req_scope),
+                    None
+                )
+            # 3. Try word prefix sharing (prefix of length >= 3)
+            if not matched_row:
+                def get_prefixes(text_str):
+                    return [w[:4] for w in text_str.lower().split() if len(w) >= 3]
+                
+                req_prefixes = get_prefixes(cleaned_req_scope)
+                for r in rows:
+                    row_prefixes = get_prefixes(r.scope)
+                    if any(p in row_prefixes for p in req_prefixes):
+                        matched_row = r
+                        break
+        
+        if not matched_row:
+            # Match closest scope tier by quantity
+            matched_row = min(rows, key=lambda r: abs(r.quantity - requested_qty))
+
+        base_price = float(matched_row.base_price)
+
+    # 3. Apply location multiplier
+    LOCATION_MULTIPLIERS = {
+        "colombo": 1.30,
+        "gampaha": 1.20,
+        "kandy": 1.15,
+        "kalutara": 1.10,
+        "galle": 1.10,
+        "matara": 1.05,
+        "jaffna": 1.05,
+        "kurunegala": 1.00,
+        "anuradhapura": 0.95,
+        "badulla": 0.95
+    }
+    
+    district_norm = str(district or "").strip().lower()
+    multiplier = LOCATION_MULTIPLIERS.get(district_norm, 1.00)
+    final_price = base_price * multiplier
+
+    # 4. Round to the nearest 50 LKR
+    rounded_price = round(final_price / 50.0) * 50
+    return int(rounded_price)
+
