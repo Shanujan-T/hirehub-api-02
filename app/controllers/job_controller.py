@@ -205,3 +205,20 @@ def get_job_applications(job_id):
         .all()
     )
     return jsonify({"applications": [a.to_dict(include_community=True) for a in applications]}), 200
+
+
+def get_suggested_price(category, scope, quantity, district):
+    from app.utils.pricing_utils import suggest_price
+
+    qty = 1
+    if quantity:
+        try:
+            qty = float(quantity)
+            if qty.is_integer():
+                qty = int(qty)
+        except ValueError:
+            qty = 1
+
+    price = suggest_price(category, qty, district, scope)
+    return jsonify({"suggestedPrice": price}), 200
+
