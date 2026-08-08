@@ -294,6 +294,7 @@ def create_app():
             open_call_model,
             open_call_skill_model,
             payment_model,
+            pricing_reference_model,
             report_model,
             review_model,
             skill_model,
