@@ -17,10 +17,28 @@ _OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 _DEFAULT_COOLDOWN_SECONDS = 8.0
 _lock = threading.Lock()
 _last_call: dict[tuple[int, str], float] = {}
+_authentication_disabled = False
 
 
 def is_ai_configured() -> bool:
-    return bool(os.getenv("OPENROUTER_API_KEY", "").strip())
+    return bool(os.getenv("OPENROUTER_API_KEY", "").strip()) and not _authentication_disabled
+
+
+def _is_authentication_error(exc: Exception) -> bool:
+    """Return true for a credential failure that cannot succeed until configuration changes."""
+    return getattr(exc, "status_code", None) in (401, 403)
+
+
+def _disable_after_authentication_error(exc: Exception) -> None:
+    """Stop retrying a rejected OpenRouter credential for the current process."""
+    global _authentication_disabled
+    with _lock:
+        _authentication_disabled = True
+    logger.warning(
+        "OpenRouter authentication failed (status=%s). AI features are disabled for this "
+        "server process; replace OPENROUTER_API_KEY and restart the API.",
+        getattr(exc, "status_code", "unknown"),
+    )
 
 
 def check_ai_cooldown(
@@ -66,7 +84,7 @@ def _openrouter_client():
     from openai import OpenAI
 
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    if not api_key:
+    if not api_key or _authentication_disabled:
         return None
     return OpenAI(
         base_url=_OPENROUTER_BASE,
@@ -91,7 +109,7 @@ def ask_ai(system_prompt: str, user_prompt: str, max_tokens: int = 500) -> str |
     """Call OpenRouter free-tier chat and return plain text, or None on any failure."""
     client = _openrouter_client()
     if not client:
-        logger.warning("ask_ai: OPENROUTER_API_KEY not set")
+        logger.info("ask_ai unavailable: OPENROUTER_API_KEY is not configured or has been disabled")
         return None
 
     try:
@@ -104,7 +122,10 @@ def ask_ai(system_prompt: str, user_prompt: str, max_tokens: int = 500) -> str |
             ],
         )
         return _extract_text(completion)
-    except Exception:
+    except Exception as exc:
+        if _is_authentication_error(exc):
+            _disable_after_authentication_error(exc)
+            return None
         logger.exception("ask_ai failed")
         return None
 
@@ -118,7 +139,7 @@ def ask_ai_with_image(
     """Best-effort vision call via OpenRouter free router. Returns None if unavailable."""
     client = _openrouter_client()
     if not client:
-        logger.warning("ask_ai_with_image: OPENROUTER_API_KEY not set")
+        logger.info("ask_ai_with_image unavailable: OpenRouter is not configured or has been disabled")
         return None
     if not image_url:
         return None
@@ -139,9 +160,12 @@ def ask_ai_with_image(
             ],
         )
         return _extract_text(completion)
-    except Exception:
+    except Exception as exc:
+        if _is_authentication_error(exc):
+            _disable_after_authentication_error(exc)
+            return None
         # Free-tier often has no vision-capable model — degrade silently.
-        logger.info("ask_ai_with_image unavailable or failed (vision best-effort)")
+        logger.info("ask_ai_with_image unavailable or failed (vision best-effort): %s", exc)
         return None
 
 

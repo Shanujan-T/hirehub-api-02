@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import date, datetime
+import json
+import logging
+import os
 from statistics import mean
 
+import requests
 from sqlalchemy import func
 
 from app.extensions import db
@@ -26,6 +31,12 @@ from app.utils.sri_lanka_districts import (
 # Minimum samples before a data-backed tier is used.
 MIN_SAMPLES = 3
 _TEST_DATA_MARKERS = ("test", "dummy", "sample", "demo", "fake", "lorem ipsum")
+logger = logging.getLogger(__name__)
+BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+WEB_SEARCH_TIMEOUT_SECONDS = 8
+ANTHROPIC_TIMEOUT_SECONDS = 12
+WEB_FALLBACK_RESULT_COUNT = 5
 
 
 def recalc_category_pricing(category_id, location):
@@ -233,7 +244,9 @@ def _missing_required_scope_fields(schema: list, scope_data: dict) -> list[str]:
         if not isinstance(field, dict) or not field.get("required", True):
             continue
         value = scope_data.get(field.get("key"))
-        if value is None or value == "" or value == []:
+        # Explicitly check empty values rather than truthiness: numeric zero is
+        # supplied input and must not be mistaken for an omitted field.
+        if value is None or (isinstance(value, str) and not value.strip()) or value == []:
             missing.append(str(field.get("label") or field.get("key")))
     return missing
 
@@ -249,6 +262,140 @@ def _reference_price(row: PricingReference, district: str | None) -> float:
     return float(row.base_price)
 
 
+def _has_dataset_category(category: Category) -> bool:
+    """True when this category is covered by the imported pricing CSV."""
+    return db.session.query(
+        PricingReference.id
+    ).filter(
+        func.lower(PricingReference.category) == category.name.lower()
+    ).first() is not None
+
+
+def _scope_summary(scope_data: dict, schema: list) -> str:
+    """Create a compact, readable scope phrase for a local-price web search."""
+    labels = {
+        str(field.get("key")): str(field.get("label") or field.get("key"))
+        for field in schema
+        if isinstance(field, dict) and field.get("key")
+    }
+    parts = []
+    for key, value in scope_data.items():
+        if value is None or value == "" or value == []:
+            continue
+        display = ", ".join(map(str, value)) if isinstance(value, list) else str(value)
+        parts.append(f"{labels.get(str(key), key)}: {display}")
+    return "; ".join(parts)
+
+
+def _brave_price_search(query: str) -> list[dict] | None:
+    """Return a small, safe subset of Brave web results for price extraction."""
+    api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+    if not api_key:
+        logger.warning("[suggested-price] web fallback unavailable: BRAVE_SEARCH_API_KEY is not configured")
+        return None
+    try:
+        response = requests.get(
+            BRAVE_SEARCH_URL,
+            params={"q": query, "count": WEB_FALLBACK_RESULT_COUNT, "search_lang": "en"},
+            headers={"Accept": "application/json", "X-Subscription-Token": api_key},
+            timeout=WEB_SEARCH_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        raw_results = response.json().get("web", {}).get("results", [])
+        results = [
+            {
+                "title": str(item.get("title") or "")[:300],
+                "description": str(item.get("description") or "")[:800],
+                "url": str(item.get("url") or "")[:500],
+            }
+            for item in raw_results[:WEB_FALLBACK_RESULT_COUNT]
+            if isinstance(item, dict)
+        ]
+        logger.info("[suggested-price] Brave fallback search completed query=%r result_count=%s", query, len(results))
+        return results
+    except (requests.RequestException, ValueError) as exc:
+        logger.exception("[suggested-price] Brave fallback search failed query=%r error=%s", query, exc)
+        return None
+
+
+def _extract_web_price_range(category: Category, location: str, scope: str, results: list[dict]) -> tuple[float, float] | None:
+    """Ask Haiku to extract—not invent—a local LKR range from search snippets."""
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        logger.warning("[suggested-price] web fallback unavailable: ANTHROPIC_API_KEY is not configured")
+        return None
+
+    prompt = (
+        "Extract a rough local service price range only from the supplied search results. "
+        "The request is for a service in Sri Lanka. Reject results for another country, unrelated "
+        "services, and non-pricing content. Do not use outside knowledge and do not guess. "
+        "Return exactly one JSON object with this schema: "
+        '{"status":"ok","low_lkr":number,"high_lkr":number} or '
+        '{"status":"insufficient_data"}. Values must be LKR, positive, and low_lkr <= high_lkr.\n\n'
+        f"Category: {category.name}\nLocation: {location}\nScope: {scope or 'Not specified'}\n"
+        f"Search results:\n{json.dumps(results, ensure_ascii=False)}"
+    )
+    try:
+        response = requests.post(
+            ANTHROPIC_MESSAGES_URL,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            json={
+                "model": os.getenv("ANTHROPIC_HAIKU_MODEL", "claude-haiku-4-5-20251001"),
+                "max_tokens": 150,
+                "temperature": 0,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=ANTHROPIC_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        content = response.json().get("content", [])
+        text = next(
+            (block.get("text") for block in content if isinstance(block, dict) and block.get("type") == "text"),
+            "",
+        )
+        extracted = json.loads(text)
+        if extracted.get("status") != "ok":
+            logger.info("[suggested-price] Haiku fallback found insufficient local price data category=%s", category.name)
+            return None
+        low = float(extracted["low_lkr"])
+        high = float(extracted["high_lkr"])
+        if low <= 0 or high <= 0 or low > high:
+            raise ValueError("Haiku returned an invalid LKR range")
+        return _round_lkr(low), _round_lkr(high)
+    except (requests.RequestException, ValueError, TypeError, KeyError, AttributeError, json.JSONDecodeError) as exc:
+        logger.exception("[suggested-price] Haiku fallback extraction failed category=%s error=%s", category.name, exc)
+        return None
+
+
+def _web_fallback_suggestion(category: Category, location: str, scope_data: dict, schema: list) -> dict:
+    """Low-confidence fallback exclusively for categories absent from the CSV."""
+    scope = _scope_summary(scope_data, schema)
+    query = " ".join(part for part in (category.name, scope, "service price", location, "Sri Lanka") if part).strip()
+    logger.info("[suggested-price] method=web_fallback category=%s query=%r", category.name, query)
+    results = _brave_price_search(query)
+    if not results:
+        return _result(None, 0, "web_fallback_unavailable", "Price estimate unavailable for this category.")
+    price_range = _extract_web_price_range(category, location, scope, results)
+    if price_range is None:
+        return _result(None, 0, "web_fallback_unavailable", "Price estimate unavailable for this category.")
+    low, high = price_range
+    midpoint = _round_lkr((low + high) / 2)
+    result = _result(
+        midpoint,
+        0,
+        "web_fallback",
+        "Estimated from web sources (limited local data available).",
+        is_seeded_estimate=False,
+    )
+    result["suggested_price_low"] = low
+    result["suggested_price_high"] = high
+    return result
+
+
 def _dataset_suggestion(category: Category, location: str, scope_data: dict, schema: list) -> dict | None:
     """Use the imported CSV as the primary, scope-aware price reference."""
     rows = (
@@ -257,6 +404,7 @@ def _dataset_suggestion(category: Category, location: str, scope_data: dict, sch
         .all()
     )
     if not rows:
+        logger.warning("[suggested-price] CSV lookup found no category rows", extra={"category": category.name, "location": location})
         return None
 
     district = match_district(location)
@@ -267,11 +415,20 @@ def _dataset_suggestion(category: Category, location: str, scope_data: dict, sch
 
     if numeric_field:
         requested = _float_or_none(scope_data.get(numeric_field.get("key")))
-        if not requested or requested <= 0:
+        if requested is None or requested < 0:
+            logger.warning(
+                "[suggested-price] CSV lookup skipped: numeric scope is missing or negative category=%s field=%s value=%s",
+                category.name, numeric_field.get("key"), requested,
+            )
             return None
         unit = str(numeric_field.get("unit") or "").strip().lower()
         tier_rows = [row for row in rows if not unit or row.unit.strip().lower() == unit] or rows
         tier_rows = sorted(tier_rows, key=lambda row: row.quantity)
+        logger.info(
+            "[suggested-price] CSV matching rows category=%s requested=%s unit=%s rows=%s",
+            category.name, requested, unit,
+            [(row.scope, row.quantity, _reference_price(row, district)) for row in tier_rows],
+        )
         exact = next((row for row in tier_rows if row.quantity == requested), None)
         if exact:
             price = _round_lkr(_reference_price(exact, district))
@@ -284,6 +441,7 @@ def _dataset_suggestion(category: Category, location: str, scope_data: dict, sch
             upper_price = _reference_price(upper, district)
             fraction = (requested - lower.quantity) / (upper.quantity - lower.quantity)
             price = _round_lkr(lower_price + fraction * (upper_price - lower_price))
+            logger.info("[suggested-price] CSV interpolation requested=%s lower=%s upper=%s price=%s", requested, lower.scope, upper.scope, price)
             result = _result(price, 0, "dataset_interpolated_range", f"CSV reference interpolated between {lower.scope} and {upper.scope} in {district or location}.", is_seeded_estimate=True)
             result["suggested_price_low"] = _round_lkr(min(lower_price, upper_price))
             result["suggested_price_high"] = _round_lkr(max(lower_price, upper_price))
@@ -292,6 +450,7 @@ def _dataset_suggestion(category: Category, location: str, scope_data: dict, sch
         # Do not scale a short request down below the dataset's smallest valid scope tier.
         nearest = tier_rows[0] if requested < tier_rows[0].quantity else tier_rows[-1]
         price = _round_lkr(_reference_price(nearest, district))
+        logger.info("[suggested-price] CSV nearest-tier fallback requested=%s selected=%s price=%s", requested, nearest.scope, price)
         return _result(price, 0, "dataset_reference", f"CSV reference: nearest scope tier {nearest.scope} in {district or location}.", is_seeded_estimate=True)
 
     selected_text = " ".join(str(value) for value in scope_data.values() if isinstance(value, str)).strip().lower()
@@ -327,6 +486,37 @@ def _blend_valid_completed_history(reference: dict, category_id: int, location: 
     for key in ("suggested_price_low", "suggested_price_high"):
         if key in reference:
             reference[key] = _round_lkr(float(reference[key]) * factor)
+    return reference
+
+
+def _apply_deadline_urgency(reference: dict, deadline: str | None) -> dict | None:
+    """Apply a transparent, fixed rush premium to a completed CSV suggestion."""
+    try:
+        deadline_text = str(deadline or "").strip()
+        try:
+            due_date = date.fromisoformat(deadline_text)
+        except ValueError:
+            due_date = datetime.strptime(deadline_text, "%m/%d/%Y").date()
+    except (TypeError, ValueError):
+        logger.exception("[suggested-price] deadline parsing failed for value=%r", deadline)
+        return None
+
+    days_until_due = (due_date - date.today()).days
+    logger.info("[suggested-price] deadline urgency deadline=%r parsed_date=%s days_until_due=%s", deadline, due_date.isoformat(), days_until_due)
+    if days_until_due < 0:
+        return None
+    if days_until_due < 2:
+        multiplier, label = 1.30, "high urgency (+30%, due within 48 hours)"
+    elif days_until_due < 7:
+        multiplier, label = 1.15, "moderate urgency (+15%, due within 7 days)"
+    else:
+        multiplier, label = 1.00, "standard timeline (no rush premium)"
+
+    for key in ("suggested_price", "average_price", "suggested_price_low", "suggested_price_high"):
+        if reference.get(key) is not None:
+            reference[key] = _round_lkr(float(reference[key]) * multiplier)
+    reference["urgency"] = {"days_until_due": days_until_due, "multiplier": multiplier, "label": label}
+    reference["note"] = f"{reference.get('note', '').rstrip('.')} Deadline: {label}."
     return reference
 
 
@@ -500,6 +690,7 @@ def get_pricing_suggestion(
     scope_data=None,
     scope_schema=None,
     exclude_job_id=None,
+    deadline=None,
 ):
     """
     Suggest a price for category + location.
@@ -529,8 +720,25 @@ def get_pricing_suggestion(
 
     scope_key = category.baseline_scope_key if category else None
 
+    logger.info(
+        "[suggested-price] function input category_id=%s category=%s location=%r deadline=%r scope_data=%s required_scope_fields=%s",
+        category_id,
+        category.name if category else None,
+        location,
+        deadline,
+        scope_data,
+        [
+            {"key": field.get("key"), "label": field.get("label"), "type": field.get("type"), "value": scope_data.get(field.get("key"))}
+            for field in schema
+            if isinstance(field, dict) and field.get("required", True)
+        ],
+    )
+
     if category:
+        if not deadline:
+            return _result(None, 0, "deadline_required", "Select a valid deadline to see a price suggestion.")
         missing_scope = _missing_required_scope_fields(schema, scope_data)
+        logger.info("[suggested-price] required-scope validation missing=%s", missing_scope)
         if missing_scope:
             return _result(
                 None,
@@ -539,11 +747,24 @@ def get_pricing_suggestion(
                 "Select job scope to see a price suggestion: " + ", ".join(missing_scope) + ".",
             )
 
-        dataset = _dataset_suggestion(category, location, scope_data, schema)
+        csv_covered = _has_dataset_category(category)
+        logger.info("[suggested-price] category=%s method=csv csv_covered=%s", category.name, csv_covered)
+        dataset = _dataset_suggestion(category, location, scope_data, schema) if csv_covered else None
         if dataset is not None:
-            return _blend_valid_completed_history(
+            dataset = _blend_valid_completed_history(
                 dataset, category.id, location, scope_data, scope_key
             )
+            adjusted = _apply_deadline_urgency(dataset, deadline)
+            if adjusted is not None:
+                logger.info("[suggested-price] method=csv category=%s", category.name)
+                return adjusted
+            return _result(None, 0, "deadline_required", "Select a valid future deadline to see a price suggestion.")
+        if not csv_covered:
+            return _web_fallback_suggestion(category, location, scope_data, schema)
+
+        # CSV coverage is authoritative. A covered category must never trigger
+        # paid web/LLM calls merely because its scoped lookup was unusable.
+        return _result(None, 0, "csv_unavailable", "Price estimate unavailable for this category.")
 
     pricing_row, district = _lookup_district_pricing(category_id, location)
 
