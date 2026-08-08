@@ -1,17 +1,20 @@
 import os
 import logging
-import resend
+import requests
 
 logger = logging.getLogger(__name__)
 
 
 def send_otp_email(to_email: str, code: str) -> None:
-    api_key = os.getenv("RESEND_API_KEY")
+    api_key = os.getenv("BREVO_API_KEY", "").strip()
     if not api_key:
-        raise ValueError("RESEND_API_KEY is not configured in the environment.")
+        raise ValueError("BREVO_API_KEY is not configured in the environment.")
 
-    resend.api_key = api_key
-    sender = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
+    sender = os.getenv("BREVO_FROM_EMAIL", "").strip()
+    if not sender:
+        raise ValueError("BREVO_FROM_EMAIL is not configured in the environment.")
+
+    sender_name = os.getenv("BREVO_FROM_NAME", "HireHub").strip() or "HireHub"
 
     subject = "Your HireHub account verification code"
     html_content = (
@@ -19,13 +22,24 @@ def send_otp_email(to_email: str, code: str) -> None:
         "It expires in 10 minutes. If you did not request this, you can ignore this email."
     )
 
-    params: resend.Emails.SendParams = {
-        "from": sender,
-        "to": [to_email],
+    payload = {
+        "sender": {"email": sender, "name": sender_name},
+        "to": [{"email": to_email}],
         "subject": subject,
-        "html": html_content,
+        "htmlContent": html_content,
     }
 
-    logger.info("Attempting to send Resend email to %s (from=%s)", to_email, sender)
-    res = resend.Emails.send(params)
-    logger.info("Resend email sent successfully. ID: %s", getattr(res, "id", None))
+    logger.info("Attempting to send Brevo email to %s (from=%s)", to_email, sender)
+    response = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={"accept": "application/json", "api-key": api_key, "content-type": "application/json"},
+        json=payload,
+        timeout=15,
+    )
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise RuntimeError(f"Brevo email send failed: {response.text}") from exc
+
+    message_id = response.json().get("messageId")
+    logger.info("Brevo email sent successfully. ID: %s", message_id)
