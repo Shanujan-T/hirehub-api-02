@@ -69,7 +69,7 @@ def run_migration() -> None:
             if not schema:
                 continue
             annotated = [
-                _annotate_field(f, cat.baseline_unit) for f in schema if isinstance(f, dict)
+                _annotate_field(f, getattr(cat, "baseline_unit", None)) for f in schema if isinstance(f, dict)
             ]
             normalized, errors = normalize_scope_schema(annotated)
             if errors:
